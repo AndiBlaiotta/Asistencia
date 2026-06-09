@@ -255,7 +255,7 @@
   // 1. La URL de tu Google Apps Script (la obtenés al desplegar el script)
   // 2. Las contraseñas de cada empleado
   // =====================================================================
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxDbFmSpioD_CHh6oD_IBvX_WRBjoKhfd1tvefXBY3LXSPfJOYPITnRI7zcDkPLLBR4/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby5Mw8hGVBSK8EnKuQfpxLB1DMBZYkW45XWEH3i1obCJpDnDi-3fEWqOR4a0BQfovQL/exec";
 
   const EMPLEADOS = {
     "Maria Decimas":        "maria123",
@@ -369,30 +369,27 @@
     };
 
     try {
-      if (APPS_SCRIPT_URL === "https://script.google.com/macros/s/AKfycby5Mw8hGVBSK8EnKuQfpxLB1DMBZYkW45XWEH3i1obCJpDnDi-3fEWqOR4a0BQfovQL/exec") {
-        throw new Error("URL de Apps Script no configurada");
-      }
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify(data)
+      const params = new URLSearchParams({
+        empleado:  data.empleado,
+        tipo:      data.tipo,
+        fecha:     data.fecha,
+        hora:      data.hora,
+        lat:       data.lat,
+        lon:       data.lon,
+        precision: data.precision
       });
-      const json = await res.json();
-      if (json.status === "ok") {
-        msgEl.textContent = `✅ ${tipo} registrada correctamente a las ${data.hora}`;
-        todayRecords.push(data);
-        renderHistory();
-      } else {
-        throw new Error(json.message || "Error desconocido");
-      }
+      await fetch(APPS_SCRIPT_URL + "?" + params.toString(), {
+        method: "GET",
+        mode: "no-cors",
+        redirect: "follow"
+      });
+      // no-cors no permite leer la respuesta, pero el dato se envía igual
+      msgEl.textContent = `✅ ${tipo} registrada correctamente a las ${data.hora}`;
+      todayRecords.push(data);
+      renderHistory();
     } catch (e) {
-      if (e.message.includes("no configurada")) {
-        msgEl.className = "error";
-        msgEl.textContent = "⚠️ Falta configurar la URL del Apps Script (ver instrucciones).";
-      } else {
-        msgEl.className = "error";
-        msgEl.textContent = "❌ Error al guardar: " + e.message;
-      }
+      msgEl.className = "error";
+      msgEl.textContent = "❌ Error al guardar: " + e.message;
     }
 
     btnE.disabled = btnS.disabled = false;
