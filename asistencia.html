@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Asistencia</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 32px 24px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .logo h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .logo p {
+      font-size: 13px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 6px;
+      margin-top: 16px;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 15px;
+      color: #222;
+      background: #fafafa;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus {
+      border-color: #4f46e5;
+      background: white;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary {
+      background: #4f46e5;
+      color: white;
+    }
+
+    .btn-entrada {
+      background: #22c55e;
+      color: white;
+      margin-top: 12px;
+    }
+
+    .btn-salida {
+      background: #ef4444;
+      color: white;
+      margin-top: 12px;
+    }
+
+    .btn-logout {
+      background: none;
+      color: #888;
+      border: 1.5px solid #e0e0e0;
+      font-size: 13px;
+      padding: 10px;
+      margin-top: 16px;
+      font-weight: 600;
+    }
+
+    .error {
+      color: #ef4444;
+      font-size: 13px;
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    .success {
+      color: #22c55e;
+      font-size: 13px;
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    .user-info {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .user-info .nombre {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .user-info .hora {
+      font-size: 32px;
+      font-weight: 800;
+      color: #4f46e5;
+      margin: 8px 0 4px;
+      letter-spacing: 1px;
+    }
+
+    .user-info .fecha {
+      font-size: 14px;
+      color: #888;
+    }
+
+    .location-status {
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .location-status.ok { color: #22c55e; }
+    .location-status.error { color: #ef4444; }
+
+    .history {
+      margin-top: 24px;
+      border-top: 1px solid #f0f0f0;
+      padding-top: 16px;
+    }
+
+    .history h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #888;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #f5f5f5;
+      font-size: 13px;
+    }
+
+    .badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .badge-entrada { background: #dcfce7; color: #16a34a; }
+    .badge-salida  { background: #fee2e2; color: #dc2626; }
+
+    #screen-login  { display: block; }
+    #screen-home   { display: none; }
+  </style>
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<div id="screen-login" class="card">
+  <div class="logo">
+    <h1>📋 Asistencia</h1>
+    <p>Ingresá con tus datos</p>
+  </div>
+
+  <label for="inp-nombre">Empleado</label>
+  <select id="inp-nombre">
+    <option value="">-- Seleccioná tu nombre --</option>
+    <option value="Maria Decimas">Maria Decimas</option>
+    <option value="Celeste Freire">Celeste Freire</option>
+    <option value="Rocio Medina">Rocio Medina</option>
+    <option value="Brisa Medina">Brisa Medina</option>
+    <option value="Sabrina Scarampo">Sabrina Scarampo</option>
+    <option value="Sabrina Yanel Dichito">Sabrina Yanel Dichito</option>
+    <option value="Alejandro Jelvez">Alejandro Jelvez</option>
+    <option value="Rebeca Ayala">Rebeca Ayala</option>
+  </select>
+
+  <label for="inp-pass">Contraseña</label>
+  <input type="password" id="inp-pass" placeholder="••••••">
+
+  <button class="btn btn-primary" onclick="login()">Ingresar</button>
+  <div id="login-error" class="error"></div>
+</div>
+
+<!-- ===================== HOME ===================== -->
+<div id="screen-home" class="card">
+  <div class="user-info">
+    <div class="nombre" id="display-nombre"></div>
+    <div class="hora"   id="display-hora">--:--</div>
+    <div class="fecha"  id="display-fecha"></div>
+  </div>
+
+  <div id="loc-status" class="location-status">Obteniendo ubicación...</div>
+
+  <button class="btn btn-entrada" id="btn-entrada" onclick="registrar('Entrada')">✅ Registrar ENTRADA</button>
+  <button class="btn btn-salida"  id="btn-salida"  onclick="registrar('Salida')">🚪 Registrar SALIDA</button>
+
+  <div id="home-msg" class="success"></div>
+
+  <div class="history" id="history-box" style="display:none">
+    <h3>Hoy</h3>
+    <div id="history-list"></div>
+  </div>
+
+  <button class="btn btn-logout" onclick="logout()">Cerrar sesión</button>
+</div>
+
+<script>
+  // =====================================================================
+  // ✏️  CONFIGURACIÓN — editá estas dos cosas:
+  // 1. La URL de tu Google Apps Script (la obtenés al desplegar el script)
+  // 2. Las contraseñas de cada empleado
+  // =====================================================================
+  const APPS_SCRIPT_URL = "PEGAR_AQUI_LA_URL_DE_TU_APPS_SCRIPT";
+
+  const EMPLEADOS = {
+    "Maria Decimas":        "maria123",
+    "Celeste Freire":       "celeste123",
+    "Rocio Medina":         "rocio123",
+    "Brisa Medina":         "brisa123",
+    "Sabrina Scarampo":     "sabrina123",
+    "Sabrina Yanel Dichito":"yanel123",
+    "Alejandro Jelvez":     "alejandro123",
+    "Rebeca Ayala":         "rebeca123"
+  };
+  // =====================================================================
+
+  let currentUser = null;
+  let currentCoords = null;
+  let clockInterval = null;
+  let todayRecords = [];
+
+  // ---------- LOGIN ----------
+  function login() {
+    const nombre = document.getElementById("inp-nombre").value.trim();
+    const pass   = document.getElementById("inp-pass").value.trim();
+    const errEl  = document.getElementById("login-error");
+    errEl.textContent = "";
+
+    if (!nombre) { errEl.textContent = "Seleccioná tu nombre."; return; }
+    if (!EMPLEADOS[nombre]) { errEl.textContent = "Usuario no encontrado."; return; }
+    if (EMPLEADOS[nombre] !== pass) { errEl.textContent = "Contraseña incorrecta."; return; }
+
+    currentUser = nombre;
+    document.getElementById("display-nombre").textContent = nombre;
+    document.getElementById("screen-login").style.display = "none";
+    document.getElementById("screen-home").style.display  = "block";
+    document.getElementById("inp-pass").value = "";
+
+    startClock();
+    getLocation();
+    loadTodayHistory();
+  }
+
+  // ---------- LOGOUT ----------
+  function logout() {
+    currentUser = null;
+    currentCoords = null;
+    todayRecords = [];
+    clearInterval(clockInterval);
+    document.getElementById("screen-home").style.display  = "none";
+    document.getElementById("screen-login").style.display = "block";
+    document.getElementById("inp-nombre").value = "";
+    document.getElementById("home-msg").textContent = "";
+    document.getElementById("history-box").style.display = "none";
+    document.getElementById("history-list").innerHTML = "";
+  }
+
+  // ---------- RELOJ ----------
+  function startClock() {
+    function tick() {
+      const now = new Date();
+      document.getElementById("display-hora").textContent =
+        now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      document.getElementById("display-fecha").textContent =
+        now.toLocaleDateString("es-AR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+    }
+    tick();
+    clockInterval = setInterval(tick, 1000);
+  }
+
+  // ---------- UBICACIÓN ----------
+  function getLocation() {
+    const el = document.getElementById("loc-status");
+    if (!navigator.geolocation) {
+      el.textContent = "⚠️ Tu navegador no soporta GPS.";
+      el.className = "location-status error";
+      return;
+    }
+    el.textContent = "📍 Obteniendo ubicación...";
+    el.className = "location-status";
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) };
+        el.textContent = `📍 Ubicación OK (±${currentCoords.acc}m)`;
+        el.className = "location-status ok";
+      },
+      err => {
+        el.textContent = "⚠️ No se pudo obtener ubicación. El registro igual se guardará.";
+        el.className = "location-status error";
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  // ---------- REGISTRAR ----------
+  async function registrar(tipo) {
+    const msgEl = document.getElementById("home-msg");
+    const btnE  = document.getElementById("btn-entrada");
+    const btnS  = document.getElementById("btn-salida");
+
+    msgEl.className = "success";
+    msgEl.textContent = "Guardando...";
+    btnE.disabled = btnS.disabled = true;
+
+    const now = new Date();
+    const data = {
+      empleado: currentUser,
+      tipo:     tipo,
+      fecha:    now.toLocaleDateString("es-AR"),
+      hora:     now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      lat:      currentCoords ? currentCoords.lat : "",
+      lon:      currentCoords ? currentCoords.lon : "",
+      precision: currentCoords ? currentCoords.acc : ""
+    };
+
+    try {
+      if (APPS_SCRIPT_URL === "https://script.google.com/macros/s/AKfycby5Mw8hGVBSK8EnKuQfpxLB1DMBZYkW45XWEH3i1obCJpDnDi-3fEWqOR4a0BQfovQL/exec") {
+        throw new Error("URL de Apps Script no configurada");
+      }
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify(data)
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        msgEl.textContent = `✅ ${tipo} registrada correctamente a las ${data.hora}`;
+        todayRecords.push(data);
+        renderHistory();
+      } else {
+        throw new Error(json.message || "Error desconocido");
+      }
+    } catch (e) {
+      if (e.message.includes("no configurada")) {
+        msgEl.className = "error";
+        msgEl.textContent = "⚠️ Falta configurar la URL del Apps Script (ver instrucciones).";
+      } else {
+        msgEl.className = "error";
+        msgEl.textContent = "❌ Error al guardar: " + e.message;
+      }
+    }
+
+    btnE.disabled = btnS.disabled = false;
+  }
+
+  // ---------- HISTORIAL LOCAL (sesión) ----------
+  function loadTodayHistory() {
+    todayRecords = [];
+    renderHistory();
+  }
+
+  function renderHistory() {
+    if (todayRecords.length === 0) return;
+    document.getElementById("history-box").style.display = "block";
+    const list = document.getElementById("history-list");
+    list.innerHTML = todayRecords.map(r => `
+      <div class="history-item">
+        <span>${r.hora}</span>
+        <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
+      </div>
+    `).join("");
+  }
+</script>
+</body>
+</html>
