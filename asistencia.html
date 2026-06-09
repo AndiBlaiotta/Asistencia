@@ -158,11 +158,73 @@
     .badge-entrada { background: #dcfce7; color: #16a34a; }
     .badge-salida  { background: #fee2e2; color: #dc2626; }
 
+    /* ---- TABS ---- */
+    .tab-bar {
+      display: flex;
+      border-bottom: 2px solid #f0f0f0;
+      margin-bottom: 20px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: none;
+      font-size: 14px;
+      font-weight: 600;
+      color: #aaa;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+
+    /* ---- HISTORIAL ---- */
+    .hist-day { margin-bottom: 18px; }
+    .hist-day-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #aaa;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+    }
+    .hist-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      gap: 8px;
+    }
+    .hist-row.entrada { background: #f0fdf4; }
+    .hist-row.salida  { background: #fef2f2; }
+    .hist-row .hr-serv { font-size: 14px; font-weight: 700; color: #1a1a2e; }
+    .hist-row .hr-hora { font-size: 12px; color: #888; margin-top: 2px; }
+    .hist-row .hr-right { text-align: right; flex-shrink: 0; }
+    .hist-empty { text-align: center; color: #aaa; font-size: 14px; padding: 30px 0; }
+    .hist-loading { text-align: center; color: #aaa; font-size: 14px; padding: 30px 0; }
+    .btn-refresh {
+      width: 100%;
+      padding: 10px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 10px;
+      background: none;
+      font-size: 13px;
+      font-weight: 600;
+      color: #666;
+      cursor: pointer;
+      margin-bottom: 16px;
+    }
+
     /* ---- SCREENS ---- */
     #screen-login  { display: block; }
     #screen-home   { display: none; }
     #section-servicios { display: block; }
     #section-registro  { display: none; }
+    #tab-registrar { display: block; }
+    #tab-historial { display: none; }
   </style>
 </head>
 <body>
@@ -205,31 +267,39 @@
     <div class="loc-status" id="loc-status">Obteniendo ubicación...</div>
   </div>
 
-  <!-- PASO 1: Selección de servicio -->
-  <div id="section-servicios">
-    <div class="section-title">¿En qué servicio estás?</div>
-    <div id="service-list"></div>
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tbtn-registrar" onclick="switchTab('registrar')">📝 Registrar</button>
+    <button class="tab-btn"        id="tbtn-historial" onclick="switchTab('historial')">📋 Historial</button>
   </div>
 
-  <!-- PASO 2: Registro entrada / salida -->
-  <div id="section-registro">
-    <div class="selected-banner">
-      <div class="sb-label">Servicio seleccionado</div>
-      <div class="sb-nombre" id="sb-nombre"></div>
-      <div class="sb-dir"    id="sb-dir"></div>
+  <!-- TAB: REGISTRAR -->
+  <div id="tab-registrar">
+    <!-- PASO 1: Selección de servicio -->
+    <div id="section-servicios">
+      <div class="section-title">¿En qué servicio estás?</div>
+      <div id="service-list"></div>
     </div>
 
-    <button class="btn btn-entrada" id="btn-entrada" onclick="registrar('Entrada')">✅ Registrar ENTRADA</button>
-    <button class="btn btn-salida"  id="btn-salida"  onclick="registrar('Salida')">🚪 Registrar SALIDA</button>
-    <button class="btn btn-cambiar" onclick="cambiarServicio()">↩ Cambiar servicio</button>
+    <!-- PASO 2: Registro entrada / salida -->
+    <div id="section-registro">
+      <div class="selected-banner">
+        <div class="sb-label">Servicio seleccionado</div>
+        <div class="sb-nombre" id="sb-nombre"></div>
+        <div class="sb-dir"    id="sb-dir"></div>
+      </div>
+      <button class="btn btn-entrada" id="btn-entrada" onclick="registrar('Entrada')">✅ Registrar ENTRADA</button>
+      <button class="btn btn-salida"  id="btn-salida"  onclick="registrar('Salida')">🚪 Registrar SALIDA</button>
+      <button class="btn btn-cambiar" onclick="cambiarServicio()">↩ Cambiar servicio</button>
+    </div>
+
+    <div id="home-msg" class="success" style="margin-top:14px;"></div>
   </div>
 
-  <div id="home-msg" class="success" style="margin-top:14px;"></div>
-
-  <!-- Historial del día -->
-  <div class="history" id="history-box" style="display:none">
-    <div class="section-title">Registros de hoy</div>
-    <div id="history-list"></div>
+  <!-- TAB: HISTORIAL -->
+  <div id="tab-historial">
+    <button class="btn-refresh" onclick="cargarHistorial()">🔄 Actualizar historial</button>
+    <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
   </div>
 
   <button class="btn btn-logout" onclick="logout()" style="margin-top:20px;">Cerrar sesión</button>
@@ -239,7 +309,7 @@
   // ============================================================
   // ✏️  PEGÁ TU URL DEL APPS SCRIPT AQUÍ:
   // ============================================================
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwf1vDxHmWEXDhKf8q9lo1jUeSxEiB8pWG54v1JhsC0XDQW5mHXeeElPg6YaZD6CdiT/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyWOOza-bxq0_fvu0BF1dU2uh-F8aYT-XqFH7FUSI90_gfRb31AGeCRFrIU0qIP94H6/exec";
 
   // ============================================================
   // EMPLEADOS y contraseñas
@@ -464,19 +534,60 @@
     btnE.disabled = btnS.disabled = false;
   }
 
-  // ---------- HISTORIAL ----------
-  function renderHistory() {
-    if (todayRecords.length === 0) return;
-    document.getElementById("history-box").style.display = "block";
-    document.getElementById("history-list").innerHTML = todayRecords.map(r => `
-      <div class="history-item">
-        <div class="hi-left">
-          <div class="hi-serv">${r.servicio}</div>
-          <div class="hi-hora">${r.hora}</div>
+  // ---------- TABS ----------
+  function switchTab(tab) {
+    document.getElementById("tab-registrar").style.display = tab === "registrar" ? "block" : "none";
+    document.getElementById("tab-historial").style.display = tab === "historial" ? "block" : "none";
+    document.getElementById("tbtn-registrar").classList.toggle("active", tab === "registrar");
+    document.getElementById("tbtn-historial").classList.toggle("active", tab === "historial");
+    if (tab === "historial") cargarHistorial();
+  }
+
+  // ---------- CARGAR HISTORIAL DESDE SHEETS ----------
+  async function cargarHistorial() {
+    const el = document.getElementById("hist-content");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando registros...</div>`;
+
+    try {
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({ action: "historial", empleado: currentUser }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
+
+      if (!json.records || json.records.length === 0) {
+        el.innerHTML = `<div class="hist-empty">No hay registros todavía.</div>`;
+        return;
+      }
+
+      // Agrupar por fecha
+      const grupos = {};
+      json.records.forEach(r => {
+        if (!grupos[r.fecha]) grupos[r.fecha] = [];
+        grupos[r.fecha].push(r);
+      });
+
+      el.innerHTML = Object.entries(grupos).map(([fecha, registros]) => `
+        <div class="hist-day">
+          <div class="hist-day-label">${fecha}</div>
+          ${registros.map(r => `
+            <div class="hist-row ${r.tipo.toLowerCase()}">
+              <div>
+                <div class="hr-serv">${r.servicio}</div>
+                <div class="hr-hora">${r.hora}</div>
+              </div>
+              <div class="hr-right">
+                <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
+                ${r.linkGPS && r.linkGPS !== 'No disponible'
+                  ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
+                  : ''}
+              </div>
+            </div>
+          `).join("")}
         </div>
-        <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
-      </div>
-    `).join("");
+      `).join("");
+
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ Error al cargar: ${e.message}</div>`;
+    }
   }
 </script>
 </body>
