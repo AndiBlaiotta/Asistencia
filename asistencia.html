@@ -12,7 +12,7 @@
       background: #f0f2f5;
       min-height: 100vh;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       padding: 20px;
     }
@@ -20,28 +20,15 @@
     .card {
       background: white;
       border-radius: 16px;
-      padding: 32px 24px;
+      padding: 28px 22px;
       width: 100%;
-      max-width: 380px;
+      max-width: 400px;
       box-shadow: 0 4px 24px rgba(0,0,0,0.10);
     }
 
-    .logo {
-      text-align: center;
-      margin-bottom: 28px;
-    }
-
-    .logo h1 {
-      font-size: 22px;
-      font-weight: 700;
-      color: #1a1a2e;
-    }
-
-    .logo p {
-      font-size: 13px;
-      color: #888;
-      margin-top: 4px;
-    }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo h1 { font-size: 22px; font-weight: 700; color: #1a1a2e; }
+    .logo p  { font-size: 13px; color: #888; margin-top: 4px; }
 
     label {
       display: block;
@@ -64,10 +51,7 @@
       transition: border-color 0.2s;
     }
 
-    input:focus, select:focus {
-      border-color: #4f46e5;
-      background: white;
-    }
+    input:focus, select:focus { border-color: #4f46e5; background: white; }
 
     .btn {
       width: 100%;
@@ -77,129 +61,113 @@
       font-size: 16px;
       font-weight: 700;
       cursor: pointer;
-      margin-top: 20px;
-      transition: opacity 0.2s, transform 0.1s;
-    }
-
-    .btn:active { transform: scale(0.98); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn-primary {
-      background: #4f46e5;
-      color: white;
-    }
-
-    .btn-entrada {
-      background: #22c55e;
-      color: white;
-      margin-top: 12px;
-    }
-
-    .btn-salida {
-      background: #ef4444;
-      color: white;
-      margin-top: 12px;
-    }
-
-    .btn-logout {
-      background: none;
-      color: #888;
-      border: 1.5px solid #e0e0e0;
-      font-size: 13px;
-      padding: 10px;
       margin-top: 16px;
-      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
     }
+    .btn:active  { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-    .error {
-      color: #ef4444;
-      font-size: 13px;
-      margin-top: 10px;
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-entrada { background: #22c55e; color: white; }
+    .btn-salida  { background: #ef4444; color: white; }
+    .btn-logout  { background: none; color: #aaa; border: 1.5px solid #e8e8e8; font-size: 13px; padding: 10px; }
+    .btn-cambiar { background: none; color: #4f46e5; border: 1.5px solid #c7d2fe; font-size: 13px; padding: 10px; font-weight: 600; margin-top: 10px; }
+
+    .error   { color: #ef4444; font-size: 13px; margin-top: 10px; text-align: center; }
+    .success { color: #22c55e; font-size: 13px; margin-top: 10px; text-align: center; }
+
+    /* ---- HEADER EMPLEADO ---- */
+    .user-header {
       text-align: center;
+      padding-bottom: 18px;
+      border-bottom: 1px solid #f0f0f0;
+      margin-bottom: 18px;
     }
+    .user-header .nombre { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+    .user-header .hora   { font-size: 30px; font-weight: 800; color: #4f46e5; margin: 6px 0 3px; letter-spacing: 1px; }
+    .user-header .fecha  { font-size: 13px; color: #888; }
 
-    .success {
-      color: #22c55e;
-      font-size: 13px;
-      margin-top: 10px;
-      text-align: center;
-    }
+    .loc-status { font-size: 12px; color: #888; text-align: center; margin-top: 8px; }
+    .loc-status.ok    { color: #22c55e; }
+    .loc-status.error { color: #ef4444; }
 
-    .user-info {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-
-    .user-info .nombre {
-      font-size: 20px;
-      font-weight: 700;
-      color: #1a1a2e;
-    }
-
-    .user-info .hora {
-      font-size: 32px;
-      font-weight: 800;
-      color: #4f46e5;
-      margin: 8px 0 4px;
-      letter-spacing: 1px;
-    }
-
-    .user-info .fecha {
-      font-size: 14px;
-      color: #888;
-    }
-
-    .location-status {
+    /* ---- SERVICIOS ---- */
+    .section-title {
       font-size: 12px;
+      font-weight: 700;
       color: #888;
-      text-align: center;
-      margin-top: 10px;
-    }
-
-    .location-status.ok { color: #22c55e; }
-    .location-status.error { color: #ef4444; }
-
-    .history {
-      margin-top: 24px;
-      border-top: 1px solid #f0f0f0;
-      padding-top: 16px;
-    }
-
-    .history h3 {
-      font-size: 13px;
-      font-weight: 600;
-      color: #888;
-      margin-bottom: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
     }
 
+    .service-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border: 1.5px solid #e8e8e8;
+      border-radius: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      text-align: left;
+      width: 100%;
+      background: white;
+    }
+    .service-card:active { background: #f5f3ff; border-color: #a5b4fc; }
+    .service-card .s-nombre { font-size: 15px; font-weight: 700; color: #1a1a2e; }
+    .service-card .s-dir    { font-size: 12px; color: #888; margin-top: 2px; }
+    .service-card .s-arrow  { font-size: 18px; color: #c7d2fe; margin-left: 10px; flex-shrink: 0; }
+
+    /* ---- SERVICIO SELECCIONADO ---- */
+    .selected-banner {
+      background: #f5f3ff;
+      border: 1.5px solid #a5b4fc;
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+    .selected-banner .sb-label { font-size: 11px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; }
+    .selected-banner .sb-nombre { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
+    .selected-banner .sb-dir    { font-size: 12px; color: #888; margin-top: 1px; }
+
+    /* ---- HISTORIAL ---- */
+    .history { margin-top: 20px; border-top: 1px solid #f0f0f0; padding-top: 16px; }
+    .history .section-title { margin-bottom: 8px; }
     .history-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 8px 0;
       border-bottom: 1px solid #f5f5f5;
-      font-size: 13px;
+      font-size: 12px;
+      color: #444;
+      gap: 8px;
     }
-
+    .history-item .hi-left  { flex: 1; }
+    .history-item .hi-serv  { font-weight: 600; color: #1a1a2e; }
+    .history-item .hi-hora  { color: #888; }
     .badge {
       padding: 3px 10px;
       border-radius: 20px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
+      flex-shrink: 0;
     }
-
     .badge-entrada { background: #dcfce7; color: #16a34a; }
     .badge-salida  { background: #fee2e2; color: #dc2626; }
 
+    /* ---- SCREENS ---- */
     #screen-login  { display: block; }
     #screen-home   { display: none; }
+    #section-servicios { display: block; }
+    #section-registro  { display: none; }
   </style>
 </head>
 <body>
 
-<!-- ===================== LOGIN ===================== -->
+<!-- ==================== LOGIN ==================== -->
 <div id="screen-login" class="card">
   <div class="logo">
     <h1>📋 Asistencia</h1>
@@ -226,37 +194,56 @@
   <div id="login-error" class="error"></div>
 </div>
 
-<!-- ===================== HOME ===================== -->
+<!-- ==================== HOME ==================== -->
 <div id="screen-home" class="card">
-  <div class="user-info">
+
+  <!-- Header con nombre y reloj -->
+  <div class="user-header">
     <div class="nombre" id="display-nombre"></div>
     <div class="hora"   id="display-hora">--:--</div>
     <div class="fecha"  id="display-fecha"></div>
+    <div class="loc-status" id="loc-status">Obteniendo ubicación...</div>
   </div>
 
-  <div id="loc-status" class="location-status">Obteniendo ubicación...</div>
+  <!-- PASO 1: Selección de servicio -->
+  <div id="section-servicios">
+    <div class="section-title">¿En qué servicio estás?</div>
+    <div id="service-list"></div>
+  </div>
 
-  <button class="btn btn-entrada" id="btn-entrada" onclick="registrar('Entrada')">✅ Registrar ENTRADA</button>
-  <button class="btn btn-salida"  id="btn-salida"  onclick="registrar('Salida')">🚪 Registrar SALIDA</button>
+  <!-- PASO 2: Registro entrada / salida -->
+  <div id="section-registro">
+    <div class="selected-banner">
+      <div class="sb-label">Servicio seleccionado</div>
+      <div class="sb-nombre" id="sb-nombre"></div>
+      <div class="sb-dir"    id="sb-dir"></div>
+    </div>
 
-  <div id="home-msg" class="success"></div>
+    <button class="btn btn-entrada" id="btn-entrada" onclick="registrar('Entrada')">✅ Registrar ENTRADA</button>
+    <button class="btn btn-salida"  id="btn-salida"  onclick="registrar('Salida')">🚪 Registrar SALIDA</button>
+    <button class="btn btn-cambiar" onclick="cambiarServicio()">↩ Cambiar servicio</button>
+  </div>
 
+  <div id="home-msg" class="success" style="margin-top:14px;"></div>
+
+  <!-- Historial del día -->
   <div class="history" id="history-box" style="display:none">
-    <h3>Hoy</h3>
+    <div class="section-title">Registros de hoy</div>
     <div id="history-list"></div>
   </div>
 
-  <button class="btn btn-logout" onclick="logout()">Cerrar sesión</button>
+  <button class="btn btn-logout" onclick="logout()" style="margin-top:20px;">Cerrar sesión</button>
 </div>
 
 <script>
-  // =====================================================================
-  // ✏️  CONFIGURACIÓN — editá estas dos cosas:
-  // 1. La URL de tu Google Apps Script (la obtenés al desplegar el script)
-  // 2. Las contraseñas de cada empleado
-  // =====================================================================
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYCAHWfBW_cBvx1xloK0CwAD8R0p2xaW6WhTTdpKhr1CW9H2IwFhv7bx3LFCeCIzg/exec";
+  // ============================================================
+  // ✏️  PEGÁ TU URL DEL APPS SCRIPT AQUÍ:
+  // ============================================================
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwf1vDxHmWEXDhKf8q9lo1jUeSxEiB8pWG54v1JhsC0XDQW5mHXeeElPg6YaZD6CdiT/exec";
 
+  // ============================================================
+  // EMPLEADOS y contraseñas
+  // ============================================================
   const EMPLEADOS = {
     "Maria Decimas":        "maria123",
     "Celeste Freire":       "celeste123",
@@ -267,12 +254,56 @@
     "Alejandro Jelvez":     "alejandro123",
     "Rebeca Ayala":         "rebeca123"
   };
-  // =====================================================================
 
-  let currentUser = null;
-  let currentCoords = null;
-  let clockInterval = null;
-  let todayRecords = [];
+  // ============================================================
+  // SERVICIOS por empleado
+  // ============================================================
+  const SERVICIOS = {
+    "Maria Decimas": [
+      { nombre: "Monteverde",  dir: "Monteverde 584, Castelar, Buenos Aires" },
+      { nombre: "Bayardi",     dir: "Bayardi 2519, Castelar, Buenos Aires" },
+      { nombre: "Elflein",     dir: "Elflein 2549, Castelar, Buenos Aires" },
+      { nombre: "Drago",       dir: "Drago 2561, Castelar, Buenos Aires" },
+      { nombre: "Azopardo",    dir: "Azopardo 1854, Castelar, Buenos Aires" }
+    ],
+    "Celeste Freire": [
+      { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires" }
+    ],
+    "Rocio Medina": [
+      { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires" }
+    ],
+    "Brisa Medina": [
+      { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
+    ],
+    "Sabrina Scarampo": [
+      { nombre: "Santa Rosa",   dir: "Santa Rosa 1592, Ituzaingó, Buenos Aires" },
+      { nombre: "Jonte",        dir: "Jonte 330, Ramos Mejía, Buenos Aires" },
+      { nombre: "Suipacha",     dir: "Suipacha 209, Haedo, Buenos Aires" },
+      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires" }
+    ],
+    "Sabrina Yanel Dichito": [
+      { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
+    ],
+    "Alejandro Jelvez": [
+      { nombre: "Del Himno",          dir: "Del Himno 124, Haedo, Buenos Aires" },
+      { nombre: "Rivadavia",          dir: "Rivadavia 16450, Haedo, Buenos Aires" },
+      { nombre: "República de Chile", dir: "República de Chile 1711, Villa Luzuriaga, Buenos Aires" }
+    ],
+    "Rebeca Ayala": [
+      { nombre: "Mitre",          dir: "Mitre 2346, Castelar, Buenos Aires" },
+      { nombre: "San Martín",     dir: "San Martín 88, Morón, Buenos Aires" },
+      { nombre: "Mercedes",       dir: "Mercedes 1090, Castelar, Buenos Aires" },
+      { nombre: "Mariano Moreno", dir: "Mariano Moreno 215, Ramos Mejía, Buenos Aires" },
+      { nombre: "Avellaneda",     dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" }
+    ]
+  };
+  // ============================================================
+
+  let currentUser    = null;
+  let currentCoords  = null;
+  let selectedService = null;
+  let clockInterval  = null;
+  let todayRecords   = [];
 
   // ---------- LOGIN ----------
   function login() {
@@ -281,33 +312,34 @@
     const errEl  = document.getElementById("login-error");
     errEl.textContent = "";
 
-    if (!nombre) { errEl.textContent = "Seleccioná tu nombre."; return; }
-    if (!EMPLEADOS[nombre]) { errEl.textContent = "Usuario no encontrado."; return; }
+    if (!nombre)           { errEl.textContent = "Seleccioná tu nombre.";    return; }
+    if (!EMPLEADOS[nombre]) { errEl.textContent = "Usuario no encontrado.";  return; }
     if (EMPLEADOS[nombre] !== pass) { errEl.textContent = "Contraseña incorrecta."; return; }
 
     currentUser = nombre;
+    document.getElementById("inp-pass").value = "";
     document.getElementById("display-nombre").textContent = nombre;
     document.getElementById("screen-login").style.display = "none";
     document.getElementById("screen-home").style.display  = "block";
-    document.getElementById("inp-pass").value = "";
 
     startClock();
     getLocation();
-    loadTodayHistory();
+    renderServices();
   }
 
   // ---------- LOGOUT ----------
   function logout() {
-    currentUser = null;
-    currentCoords = null;
-    todayRecords = [];
     clearInterval(clockInterval);
+    currentUser = currentCoords = selectedService = null;
+    todayRecords = [];
     document.getElementById("screen-home").style.display  = "none";
     document.getElementById("screen-login").style.display = "block";
     document.getElementById("inp-nombre").value = "";
     document.getElementById("home-msg").textContent = "";
     document.getElementById("history-box").style.display = "none";
     document.getElementById("history-list").innerHTML = "";
+    document.getElementById("section-servicios").style.display = "block";
+    document.getElementById("section-registro").style.display  = "none";
   }
 
   // ---------- RELOJ ----------
@@ -327,24 +359,68 @@
   function getLocation() {
     const el = document.getElementById("loc-status");
     if (!navigator.geolocation) {
-      el.textContent = "⚠️ Tu navegador no soporta GPS.";
-      el.className = "location-status error";
+      el.textContent = "⚠️ GPS no disponible.";
+      el.className = "loc-status error";
       return;
     }
     el.textContent = "📍 Obteniendo ubicación...";
-    el.className = "location-status";
-    navigator.geolocation.getCurrentPosition(
+    el.className = "loc-status";
+    navigator.geolocation.watchPosition(
       pos => {
-        currentCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) };
+        currentCoords = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          acc: Math.round(pos.coords.accuracy)
+        };
         el.textContent = `📍 Ubicación OK (±${currentCoords.acc}m)`;
-        el.className = "location-status ok";
+        el.className = "loc-status ok";
       },
-      err => {
-        el.textContent = "⚠️ No se pudo obtener ubicación. El registro igual se guardará.";
-        el.className = "location-status error";
+      () => {
+        el.textContent = "⚠️ No se pudo obtener ubicación.";
+        el.className = "loc-status error";
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000 }
     );
+  }
+
+  // ---------- RENDERIZAR SERVICIOS ----------
+  function renderServices() {
+    const servicios = SERVICIOS[currentUser] || [];
+    const list = document.getElementById("service-list");
+
+    if (servicios.length === 0) {
+      list.innerHTML = `<p style="color:#888;font-size:14px;text-align:center;padding:20px 0;">No tenés servicios asignados.</p>`;
+      return;
+    }
+
+    list.innerHTML = servicios.map((s, i) => `
+      <button class="service-card" onclick="selectService(${i})">
+        <div>
+          <div class="s-nombre">${s.nombre}</div>
+          <div class="s-dir">${s.dir}</div>
+        </div>
+        <span class="s-arrow">›</span>
+      </button>
+    `).join("");
+  }
+
+  // ---------- SELECCIONAR SERVICIO ----------
+  function selectService(index) {
+    const servicios = SERVICIOS[currentUser] || [];
+    selectedService = servicios[index];
+    document.getElementById("sb-nombre").textContent = selectedService.nombre;
+    document.getElementById("sb-dir").textContent    = selectedService.dir;
+    document.getElementById("section-servicios").style.display = "none";
+    document.getElementById("section-registro").style.display  = "block";
+    document.getElementById("home-msg").textContent = "";
+  }
+
+  // ---------- CAMBIAR SERVICIO ----------
+  function cambiarServicio() {
+    selectedService = null;
+    document.getElementById("section-registro").style.display  = "none";
+    document.getElementById("section-servicios").style.display = "block";
+    document.getElementById("home-msg").textContent = "";
   }
 
   // ---------- REGISTRAR ----------
@@ -358,34 +434,27 @@
     btnE.disabled = btnS.disabled = true;
 
     const now = new Date();
-    const data = {
-      empleado: currentUser,
-      tipo:     tipo,
-      fecha:    now.toLocaleDateString("es-AR"),
-      hora:     now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      lat:      currentCoords ? currentCoords.lat : "",
-      lon:      currentCoords ? currentCoords.lon : "",
+    const record = {
+      empleado:  currentUser,
+      servicio:  selectedService.nombre,
+      direccion: selectedService.dir,
+      tipo:      tipo,
+      fecha:     now.toLocaleDateString("es-AR"),
+      hora:      now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      lat:       currentCoords ? currentCoords.lat : "",
+      lon:       currentCoords ? currentCoords.lon : "",
       precision: currentCoords ? currentCoords.acc : ""
     };
 
     try {
-      const params = new URLSearchParams({
-        empleado:  data.empleado,
-        tipo:      data.tipo,
-        fecha:     data.fecha,
-        hora:      data.hora,
-        lat:       data.lat,
-        lon:       data.lon,
-        precision: data.precision
-      });
+      const params = new URLSearchParams(record);
       await fetch(APPS_SCRIPT_URL + "?" + params.toString(), {
         method: "GET",
         mode: "no-cors",
         redirect: "follow"
       });
-      // no-cors no permite leer la respuesta, pero el dato se envía igual
-      msgEl.textContent = `✅ ${tipo} registrada correctamente a las ${data.hora}`;
-      todayRecords.push(data);
+      msgEl.textContent = `✅ ${tipo} registrada en ${record.servicio} a las ${record.hora}`;
+      todayRecords.push(record);
       renderHistory();
     } catch (e) {
       msgEl.className = "error";
@@ -395,19 +464,16 @@
     btnE.disabled = btnS.disabled = false;
   }
 
-  // ---------- HISTORIAL LOCAL (sesión) ----------
-  function loadTodayHistory() {
-    todayRecords = [];
-    renderHistory();
-  }
-
+  // ---------- HISTORIAL ----------
   function renderHistory() {
     if (todayRecords.length === 0) return;
     document.getElementById("history-box").style.display = "block";
-    const list = document.getElementById("history-list");
-    list.innerHTML = todayRecords.map(r => `
+    document.getElementById("history-list").innerHTML = todayRecords.map(r => `
       <div class="history-item">
-        <span>${r.hora}</span>
+        <div class="hi-left">
+          <div class="hi-serv">${r.servicio}</div>
+          <div class="hi-hora">${r.hora}</div>
+        </div>
         <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
       </div>
     `).join("");
