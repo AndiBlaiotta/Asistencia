@@ -34,14 +34,14 @@ const HEADERS = [
 // Hash SHA-256 (hex) de la contraseña de cada empleado.
 // Generado a partir de las contraseñas originales con shasum -a 256.
 const EMPLEADOS_HASH = {
-  "Maria Decimas":         "626e3c805e77eeb472c42c6be607be2af7ac5c08fd7050f278e0330fe81abf5",
-  "Celeste Freire":        "22a9067d9bbd2104e0be07c6cc05be1de74d583ff4c2143248d2b67ca8c9f52",
-  "Rocio Medina":          "2131c65bf715f3f1af43a56f798b5c2722b69aa25b0471a86b8b71501e458d4",
-  "Brisa Medina":          "63fb746a9789963a9f31559a34ba63475eb096e6c4c08399c107f7bba18eb84",
-  "Sabrina Scarampo":      "8958b734a4f493cf3f7183d30975ac96fac11cab265cd6bbf49acc51888c726",
-  "Sabrina Yanel Dichito": "ef9cf1f4ce31597bc00952a8b7d5839c2f8e96f302005ee2f0f188a16368877",
-  "Alejandro Jelvez":      "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768",
-  "Rebeca Ayala":          "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f6"
+  "Maria Decimas":           "626e3c805e77eeb472c42c6be607be2af7ac5c08fd7050f278e0330fe81abf57",
+  "Celeste Freire":          "22a9067d9bbd2104e0be07c6cc05be1de74d583ff4c2143248d2b67ca8c9f52f",
+  "Rocio Medina":            "2131c65bf715f3f1af43a56f798b5c2722b69aa25b0471a86b8b71501e458d47",
+  "Brisa Medina":            "63fb746a9789963a9f31559a34ba63475eb096e6c4c08399c107f7bba18eb847",
+  "Sabrina Scarampo":        "8958b734a4f493cf3f7183d30975ac96fac11cab265cd6bbf49acc51888c726f",
+  "Sabrina Yanel Dichito":   "ef9cf1f4ce31597bc00952a8b7d5839c2f8e96f302005ee2f0f188a16368877e",
+  "Alejandro Jelvez":        "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768f",
+  "Rebeca Ayala":            "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69"
 };
 
 function jsonOut(obj) {
