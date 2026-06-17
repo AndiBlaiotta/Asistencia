@@ -335,20 +335,6 @@
   const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwBxzMn_rTW6DwmdaQWdSra4edDIc9vPOS9zYNgIchgJ5MT5M1HB8IQresJu4_3hukG/exec";
 
   // ============================================================
-  // EMPLEADOS y contraseñas
-  // ============================================================
-  const EMPLEADOS = {
-    "Maria Decimas":        "maria123",
-    "Celeste Freire":       "celeste123",
-    "Rocio Medina":         "rocio123",
-    "Brisa Medina":         "brisa123",
-    "Sabrina Scarampo":     "sabrina123",
-    "Sabrina Yanel Dichito":"yanel123",
-    "Alejandro Jelvez":     "alejandro123",
-    "Rebeca Ayala":         "rebeca123"
-  };
-
-  // ============================================================
   // SERVICIOS por empleado
   // ============================================================
   const SERVICIOS = {
@@ -393,46 +379,69 @@
   // ============================================================
 
   let currentUser    = null;
+  let currentHash    = null;
   let currentCoords  = null;
   let selectedService = null;
   let clockInterval  = null;
-  let todayRecords   = [];
+
+  // ---------- HASH (la contraseña nunca viaja en texto plano) ----------
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
 
   // ---------- LOGIN ----------
-  function login() {
-    const nombre = document.getElementById("inp-nombre").value.trim();
-    const pass   = document.getElementById("inp-pass").value.trim();
-    const errEl  = document.getElementById("login-error");
+  async function login() {
+    const nombre  = document.getElementById("inp-nombre").value.trim();
+    const pass    = document.getElementById("inp-pass").value.trim();
+    const errEl   = document.getElementById("login-error");
+    const btnLogin = document.querySelector("#screen-login .btn-primary");
     errEl.textContent = "";
 
-    if (!nombre)           { errEl.textContent = "Seleccioná tu nombre.";    return; }
-    if (!EMPLEADOS[nombre]) { errEl.textContent = "Usuario no encontrado.";  return; }
-    if (EMPLEADOS[nombre] !== pass) { errEl.textContent = "Contraseña incorrecta."; return; }
+    if (!nombre) { errEl.textContent = "Seleccioná tu nombre."; return; }
+    if (!pass)   { errEl.textContent = "Ingresá tu contraseña."; return; }
 
-    currentUser = nombre;
-    document.getElementById("inp-pass").value = "";
-    document.getElementById("display-nombre").textContent = nombre;
-    document.getElementById("screen-login").style.display = "none";
-    document.getElementById("screen-home").style.display  = "block";
+    btnLogin.disabled = true;
+    try {
+      const hash = await sha256Hex(pass);
+      const url  = APPS_SCRIPT_URL + "?" + new URLSearchParams({ action: "login", empleado: nombre, hash }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
 
-    startClock();
-    getLocation();
-    renderServices();
+      if (json.status !== "ok") {
+        errEl.textContent = json.message || "Usuario o contraseña incorrectos.";
+        return;
+      }
+
+      currentUser = nombre;
+      currentHash = hash;
+      document.getElementById("inp-pass").value = "";
+      document.getElementById("display-nombre").textContent = nombre;
+      document.getElementById("screen-login").style.display = "none";
+      document.getElementById("screen-home").style.display  = "block";
+
+      startClock();
+      getLocation();
+      renderServices();
+    } catch (e) {
+      errEl.textContent = "❌ No se pudo verificar: " + e.message;
+    } finally {
+      btnLogin.disabled = false;
+    }
   }
 
   // ---------- LOGOUT ----------
   function logout() {
     clearInterval(clockInterval);
-    currentUser = currentCoords = selectedService = null;
-    todayRecords = [];
+    currentUser = currentHash = currentCoords = selectedService = null;
     document.getElementById("screen-home").style.display  = "none";
     document.getElementById("screen-login").style.display = "block";
     document.getElementById("inp-nombre").value = "";
     document.getElementById("home-msg").textContent = "";
-    document.getElementById("history-box").style.display = "none";
-    document.getElementById("history-list").innerHTML = "";
+    document.getElementById("hist-content").innerHTML = `<div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div>`;
     document.getElementById("section-servicios").style.display = "block";
     document.getElementById("section-registro").style.display  = "none";
+    switchTab("registrar");
   }
 
   // ---------- RELOJ ----------
@@ -529,6 +538,7 @@
     const now = new Date();
     const record = {
       empleado:  currentUser,
+      hash:      currentHash,
       servicio:  selectedService.nombre,
       direccion: selectedService.dir,
       tipo:      tipo,
@@ -541,14 +551,15 @@
 
     try {
       const params = new URLSearchParams(record);
-      await fetch(APPS_SCRIPT_URL + "?" + params.toString(), {
-        method: "GET",
-        mode: "no-cors",
-        redirect: "follow"
-      });
-      msgEl.textContent = `✅ ${tipo} registrada en ${record.servicio} a las ${record.hora}`;
-      todayRecords.push(record);
-      renderHistory();
+      const res  = await fetch(APPS_SCRIPT_URL + "?" + params.toString(), { redirect: "follow" });
+      const json = await res.json();
+
+      if (json.status !== "ok") {
+        msgEl.className = "error";
+        msgEl.textContent = "❌ " + (json.message || "No se pudo guardar el registro.");
+      } else {
+        msgEl.textContent = `✅ ${tipo} registrada en ${record.servicio} a las ${record.hora}`;
+      }
     } catch (e) {
       msgEl.className = "error";
       msgEl.textContent = "❌ Error al guardar: " + e.message;
@@ -572,9 +583,14 @@
     el.innerHTML = `<div class="hist-loading">⏳ Cargando registros...</div>`;
 
     try {
-      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({ action: "historial", empleado: currentUser }).toString();
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({ action: "historial", empleado: currentUser, hash: currentHash }).toString();
       const res  = await fetch(url, { redirect: "follow" });
       const json = await res.json();
+
+      if (json.status !== "ok") {
+        el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${json.message || "No se pudo cargar el historial."}</div>`;
+        return;
+      }
 
       if (!json.records || json.records.length === 0) {
         el.innerHTML = `<div class="hist-empty">No hay registros todavía.</div>`;
