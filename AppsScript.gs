@@ -54,6 +54,17 @@ function checkAuth(empleado, hash) {
   return !!empleado && !!hash && EMPLEADOS_HASH[empleado] === hash;
 }
 
+// Sheets auto-convierte texto tipo fecha/hora a su propio tipo Date.
+// Esto lo vuelve a texto legible al leer filas viejas que ya quedaron
+// guardadas como Date (de antes de forzar formato de texto al escribir).
+function fmtCell(val) {
+  if (Object.prototype.toString.call(val) !== "[object Date]") return val;
+  const tz = Session.getScriptTimeZone();
+  return val.getFullYear() <= 1899
+    ? Utilities.formatDate(val, tz, "HH:mm:ss")
+    : Utilities.formatDate(val, tz, "dd/MM/yyyy");
+}
+
 function doGet(e) {
   const p = e.parameter || {};
 
@@ -81,10 +92,10 @@ function doGet(e) {
 
       const data = sheet.getDataRange().getValues();
       const records = data.slice(1).reverse().map(row => ({
-        fecha:    row[0],
+        fecha:    fmtCell(row[0]),
         servicio: row[1],
         tipo:     row[3],
-        hora:     row[4],
+        hora:     fmtCell(row[4]),
         lat:      row[5],
         lon:      row[6],
         linkGPS:  typeof row[7] === "string" ? row[7] : (row[5] && row[6] ? `https://www.google.com/maps?q=${row[5]},${row[6]}` : "No disponible")
@@ -145,11 +156,13 @@ function doGet(e) {
       }
 
       const lastRow = sheet.getLastRow() + 1;
-      sheet.getRange(lastRow, 1).setValue(fecha);
+      // Formato de texto en fecha/hora para que Sheets no las autoconvierta
+      // a su tipo Date interno (rompía la visualización del historial).
+      sheet.getRange(lastRow, 1).setNumberFormat("@").setValue(fecha);
       sheet.getRange(lastRow, 2).setValue(servicio);
       sheet.getRange(lastRow, 3).setValue(direccion);
       sheet.getRange(lastRow, 4).setValue(tipo);
-      sheet.getRange(lastRow, 5).setValue(hora);
+      sheet.getRange(lastRow, 5).setNumberFormat("@").setValue(hora);
       sheet.getRange(lastRow, 6).setValue(lat || "No disponible");
       sheet.getRange(lastRow, 7).setValue(lon || "No disponible");
 
