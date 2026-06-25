@@ -443,10 +443,68 @@
   let selectedService = null;
   let clockInterval  = null;
 
+  // Clave bajo la que se persiste la sesión para que no se cierre
+  // al cerrar la app o al volver atrás.
+  const SESSION_KEY = "trapo_session";
+
   // ---------- HASH (la contraseña nunca viaja en texto plano) ----------
   async function sha256Hex(text) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // ---------- SESIÓN PERSISTENTE ----------
+  // La sesión vence todos los días a las 23:39. Devuelve el timestamp de
+  // la próxima 23:39 a partir de ahora (si ya pasó hoy, es la de mañana).
+  function proximoVencimiento() {
+    const v = new Date();
+    v.setHours(23, 39, 0, 0);
+    if (v.getTime() <= Date.now()) v.setDate(v.getDate() + 1);
+    return v.getTime();
+  }
+  function saveSession(nombre, hash) {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        empleado: nombre, hash, expira: proximoVencimiento()
+      }));
+    }
+    catch (e) { /* almacenamiento no disponible: la sesión durará solo lo que dure la pestaña */ }
+  }
+  function clearSession() {
+    try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+  }
+  function loadSession() {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      // Vencida (ya pasó la 23:39 del día): descartar.
+      if (!s || !s.expira || Date.now() >= s.expira) { clearSession(); return null; }
+      // Validar que el empleado siga existiendo en la config actual.
+      if (s.empleado && s.hash && SERVICIOS[s.empleado]) return s;
+    } catch (e) {}
+    return null;
+  }
+
+  // Entra a la pantalla principal. Compartido entre login manual y
+  // restauración de sesión guardada.
+  function enterApp(nombre, hash) {
+    currentUser = nombre;
+    currentHash = hash;
+    document.getElementById("inp-pass").value = "";
+    document.getElementById("display-nombre").textContent = nombre;
+    document.getElementById("screen-login").style.display = "none";
+    document.getElementById("screen-home").style.display  = "block";
+
+    startClock();
+    getLocation();
+    renderServices();
+  }
+
+  // Al abrir la app, restaurar sesión si hay una guardada.
+  function restoreSession() {
+    const s = loadSession();
+    if (s) enterApp(s.empleado, s.hash);
   }
 
   // ---------- LOGIN ----------
@@ -472,16 +530,8 @@
         return;
       }
 
-      currentUser = nombre;
-      currentHash = hash;
-      document.getElementById("inp-pass").value = "";
-      document.getElementById("display-nombre").textContent = nombre;
-      document.getElementById("screen-login").style.display = "none";
-      document.getElementById("screen-home").style.display  = "block";
-
-      startClock();
-      getLocation();
-      renderServices();
+      saveSession(nombre, hash);
+      enterApp(nombre, hash);
     } catch (e) {
       errEl.textContent = "❌ No se pudo verificar: " + e.message;
     } finally {
@@ -491,6 +541,7 @@
 
   // ---------- LOGOUT ----------
   function logout() {
+    clearSession();
     clearInterval(clockInterval);
     currentUser = currentHash = currentCoords = selectedService = null;
     document.getElementById("screen-home").style.display  = "none";
@@ -837,6 +888,10 @@
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ Error al cargar: ${e.message}</div>`;
     }
   }
+
+  // ---------- ARRANQUE ----------
+  // Si hay sesión guardada, entrar directo sin pedir login de nuevo.
+  restoreSession();
 </script>
 </body>
 </html>
