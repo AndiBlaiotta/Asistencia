@@ -454,11 +454,11 @@
   }
 
   // ---------- SESIÓN PERSISTENTE ----------
-  // La sesión vence todos los días a las 23:39. Devuelve el timestamp de
-  // la próxima 23:39 a partir de ahora (si ya pasó hoy, es la de mañana).
+  // La sesión vence todos los días a las 23:59. Devuelve el timestamp de
+  // la próxima 23:59 a partir de ahora (si ya pasó hoy, es la de mañana).
   function proximoVencimiento() {
     const v = new Date();
-    v.setHours(23, 39, 0, 0);
+    v.setHours(23, 59, 0, 0);
     if (v.getTime() <= Date.now()) v.setDate(v.getDate() + 1);
     return v.getTime();
   }
@@ -478,7 +478,7 @@
       const raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return null;
       const s = JSON.parse(raw);
-      // Vencida (ya pasó la 23:39 del día): descartar.
+      // Vencida (ya pasó la 23:59 del día): descartar.
       if (!s || !s.expira || Date.now() >= s.expira) { clearSession(); return null; }
       // Validar que el empleado siga existiendo en la config actual.
       if (s.empleado && s.hash && SERVICIOS[s.empleado]) return s;
