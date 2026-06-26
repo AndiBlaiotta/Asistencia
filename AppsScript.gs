@@ -73,7 +73,7 @@ const EMPLEADOS_HASH = {
 // Los admins NO fichan ni piden materiales: solo pueden consultar las
 // fichadas de cualquier empleado (acción "adminHistorial").
 const ADMINS_HASH = {
-  "Andres Blaiotta":   "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36",
+  "Andrés Blaiotta":   "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36",
   "Martín Fiorentino": "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36"
 };
 

@@ -296,7 +296,7 @@
     <p class="tagline">Sistema de Asistencia · Fiorentino Blaiotta</p>
   </div>
 
-  <label for="inp-nombre">Empleado</label>
+  <label for="inp-nombre">Usuarios</label>
   <select id="inp-nombre">
     <option value="">-- Seleccioná tu nombre --</option>
     <option value="Maria Decimas">Maria Decimas</option>
@@ -308,7 +308,7 @@
     <option value="Alejandro Jelvez">Alejandro Jelvez</option>
     <option value="Rebeca Ayala">Rebeca Ayala</option>
     <optgroup label="Administración">
-      <option value="Andres Blaiotta">Andres Blaiotta</option>
+      <option value="Andrés Blaiotta">Andrés Blaiotta</option>
       <option value="Martín Fiorentino">Martín Fiorentino</option>
     </optgroup>
   </select>
@@ -514,7 +514,7 @@
   // Dueños/administradores: pueden consultar las fichadas de cualquier
   // empleado. La validación real está en el servidor (ADMINS_HASH); esta
   // lista solo sirve para restaurar la sesión guardada del lado del cliente.
-  const ADMINS = ["Andres Blaiotta", "Martín Fiorentino"];
+  const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 
   // Servicios de un empleado: los suyos + "Horas Extras" al final.
   function serviciosDe(empleado) {
