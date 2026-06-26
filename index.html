@@ -424,7 +424,7 @@
     <div id="admin-serv-list"></div>
   </div>
 
-  <!-- PASO 3: registros del servicio elegido -->
+  <!-- PASO 3: registros + materiales del servicio elegido -->
   <div id="admin-step-registros" style="display:none;">
     <div class="selected-banner">
       <div class="sb-label">Empleado · Servicio</div>
@@ -432,7 +432,25 @@
       <div class="sb-dir"    id="admin-sel-serv"></div>
     </div>
     <button class="btn btn-cambiar" onclick="adminBackServicios()">↩ Volver a servicios</button>
-    <div id="admin-registros" style="margin-top:16px;"></div>
+
+    <!-- Toggle Fichadas / Materiales -->
+    <div class="tab-bar" id="admin-subtabs" style="margin-top:16px;">
+      <button class="tab-btn active" id="admin-tbtn-fichadas"  onclick="adminSwitchView('fichadas')">📋 Fichadas</button>
+      <button class="tab-btn"        id="admin-tbtn-materiales" onclick="adminSwitchView('materiales')">📦 Materiales</button>
+    </div>
+
+    <!-- Vista: Fichadas -->
+    <div id="admin-view-fichadas">
+      <div id="admin-registros"></div>
+    </div>
+
+    <!-- Vista: Materiales (solo lectura) -->
+    <div id="admin-view-materiales" style="display:none;">
+      <div class="section-title">Estado de productos</div>
+      <div id="admin-mat-list"></div>
+      <div class="section-title" style="margin-top:18px;">Historial de pedidos</div>
+      <div id="admin-mat-hist"></div>
+    </div>
   </div>
 
   <button class="btn btn-logout" onclick="logout()" style="margin-top:20px;">Cerrar sesión</button>
@@ -1071,14 +1089,31 @@
     return adminRecordsCache.records;
   }
 
-  // PASO 3: registros del servicio elegido (filtrados del historial del empleado).
-  async function adminSelectServicio(idx) {
+  // PASO 3: registros + materiales del servicio elegido.
+  function adminSelectServicio(idx) {
     const servicios = serviciosDe(adminEmpleado);
     adminServicio = servicios[idx];
     document.getElementById("admin-sel-emp2").textContent = adminEmpleado;
     document.getElementById("admin-sel-serv").textContent = adminServicio.nombre;
-    adminShowStep("registros");
 
+    // "Horas Extras" no tiene materiales: ocultar esa pestaña.
+    document.getElementById("admin-tbtn-materiales").style.display = adminServicio.custom ? "none" : "block";
+
+    adminShowStep("registros");
+    adminSwitchView("fichadas");
+  }
+
+  // Alterna entre Fichadas y Materiales dentro de la pantalla del servicio.
+  function adminSwitchView(view) {
+    document.getElementById("admin-view-fichadas").style.display   = view === "fichadas"   ? "block" : "none";
+    document.getElementById("admin-view-materiales").style.display = view === "materiales" ? "block" : "none";
+    document.getElementById("admin-tbtn-fichadas").classList.toggle("active",  view === "fichadas");
+    document.getElementById("admin-tbtn-materiales").classList.toggle("active", view === "materiales");
+    if (view === "fichadas")   adminLoadFichadas();
+    if (view === "materiales") adminLoadMateriales();
+  }
+
+  async function adminLoadFichadas() {
     const el = document.getElementById("admin-registros");
     el.innerHTML = `<div class="hist-loading">⏳ Cargando registros...</div>`;
     try {
@@ -1087,6 +1122,64 @@
       renderAdminRegistros(filtrados, adminServicio.custom);
     } catch (e) {
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  // Materiales del servicio (solo lectura): estado de productos + log de pedidos.
+  async function adminLoadMateriales() {
+    const listEl = document.getElementById("admin-mat-list");
+    const histEl = document.getElementById("admin-mat-hist");
+    listEl.innerHTML = `<div class="hist-loading">⏳ Cargando productos...</div>`;
+    histEl.innerHTML = `<div class="hist-loading">⏳ Cargando pedidos...</div>`;
+
+    // Estado actual de cada producto.
+    try {
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
+        action: "materiales", servicio: adminServicio.nombre, admin: currentUser, hash: currentHash
+      }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
+      if (json.status !== "ok") throw new Error(json.message || "No se pudo cargar.");
+      const productos = json.productos || [];
+      listEl.innerHTML = productos.map(p => `
+        <div class="mat-item ${p.estado === 'pedido' ? 'pedido' : ''}">
+          <div>
+            <div class="mat-nombre">${p.nombre}</div>
+            ${p.estado === 'pedido'
+              ? `<div class="mat-fecha">⏳ Pedido el ${p.fecha}</div>`
+              : `<div class="mat-fecha" style="color:#16a34a;">Disponible</div>`}
+          </div>
+          <span class="badge ${p.estado === 'pedido' ? 'badge-salida' : 'badge-entrada'}">${p.estado === 'pedido' ? 'Pedido' : 'OK'}</span>
+        </div>
+      `).join("");
+    } catch (e) {
+      listEl.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+
+    // Historial de pedidos del servicio (quién pidió qué y cuándo).
+    try {
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
+        action: "historialPedidos", servicio: adminServicio.nombre, admin: currentUser, hash: currentHash
+      }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
+      if (json.status !== "ok") throw new Error(json.message || "No se pudo cargar.");
+      const records = json.records || [];
+      if (!records.length) {
+        histEl.innerHTML = `<div class="hist-empty">Sin pedidos todavía.</div>`;
+        return;
+      }
+      histEl.innerHTML = records.map(r => `
+        <div class="hist-row ${r.accion === 'Pedido' ? 'salida' : 'entrada'}">
+          <div>
+            <div class="hr-serv">${r.producto}</div>
+            <div class="hr-hora">${r.fecha} ${r.hora} · ${r.empleado}</div>
+          </div>
+          <span class="badge badge-${r.accion === 'Pedido' ? 'salida' : 'entrada'}">${r.accion}</span>
+        </div>
+      `).join("");
+    } catch (e) {
+      histEl.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
   }
 

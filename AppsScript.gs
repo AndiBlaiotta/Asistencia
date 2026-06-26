@@ -250,8 +250,9 @@ function doGet(e) {
   }
 
   // ---- MATERIALES: lista de productos con su estado para un servicio ----
+  // Acepta auth de empleado (el que pide) o de admin (dueño que consulta).
   if (p.action === "materiales" && p.servicio) {
-    if (!checkAuth(p.empleado, p.hash)) {
+    if (!checkAuth(p.empleado, p.hash) && !checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
@@ -325,8 +326,9 @@ function doGet(e) {
   }
 
   // ---- HISTORIAL DE PEDIDOS de un servicio ----
+  // Acepta auth de empleado o de admin (dueño que consulta).
   if (p.action === "historialPedidos" && p.servicio) {
-    if (!checkAuth(p.empleado, p.hash)) {
+    if (!checkAuth(p.empleado, p.hash) && !checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
