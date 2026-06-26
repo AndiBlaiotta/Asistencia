@@ -69,6 +69,14 @@ const EMPLEADOS_HASH = {
   "Rebeca Ayala":            "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69"
 };
 
+// Hash SHA-256 (hex) de la contraseña de cada dueño/administrador.
+// Los admins NO fichan ni piden materiales: solo pueden consultar las
+// fichadas de cualquier empleado (acción "adminHistorial").
+const ADMINS_HASH = {
+  "Andres Blaiotta":   "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36",
+  "Martín Fiorentino": "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36"
+};
+
 function jsonOut(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
@@ -77,6 +85,10 @@ function jsonOut(obj) {
 
 function checkAuth(empleado, hash) {
   return !!empleado && !!hash && EMPLEADOS_HASH[empleado] === hash;
+}
+
+function checkAdmin(admin, hash) {
+  return !!admin && !!hash && ADMINS_HASH[admin] === hash;
 }
 
 // Sheets auto-convierte texto tipo fecha/hora a su propio tipo Date.
@@ -162,11 +174,47 @@ function doGet(e) {
   const p = e.parameter || {};
 
   // ---- LOGIN: solo valida credenciales, no escribe nada ----
+  // Devuelve el rol para que el cliente sepa qué pantalla mostrar.
   if (p.action === "login") {
+    if (checkAdmin(p.empleado, p.hash)) {
+      return jsonOut({ status: "ok", role: "admin" });
+    }
     if (checkAuth(p.empleado, p.hash)) {
-      return jsonOut({ status: "ok" });
+      return jsonOut({ status: "ok", role: "empleado" });
     }
     return jsonOut({ status: "error", message: "Usuario o contraseña incorrectos" });
+  }
+
+  // ---- ADMIN: historial de fichadas de cualquier empleado (solo dueños) ----
+  if (p.action === "adminHistorial" && p.empleado) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const ss    = SpreadsheetApp.getActiveSpreadsheet();
+      const sheet = ss.getSheetByName(p.empleado);
+      if (!sheet || sheet.getLastRow() <= 1) {
+        return jsonOut({ status: "ok", records: [] });
+      }
+      const data = sheet.getDataRange().getValues();
+      const records = data.slice(1).reverse().map(row => {
+        const lat = row[5], lon = row[6];
+        const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+        return {
+          fecha:     fmtCell(row[0]),
+          servicio:  row[1],
+          direccion: row[2],
+          tipo:      row[3],
+          hora:      fmtCell(row[4]),
+          lat:       lat,
+          lon:       lon,
+          linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible"
+        };
+      });
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
   }
 
   // ---- HISTORIAL ----
