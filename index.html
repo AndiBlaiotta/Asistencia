@@ -351,6 +351,11 @@
         <div class="sb-nombre" id="sb-nombre"></div>
         <div class="sb-dir"    id="sb-dir"></div>
       </div>
+      <!-- Solo para "Horas Extras": el empleado escribe la dirección -->
+      <div id="he-dir-wrap" style="display:none;">
+        <label for="he-dir">Dirección donde hacés las horas extra</label>
+        <input type="text" id="he-dir" placeholder="Ej: Av. Rivadavia 1234, Morón" oninput="onHeDirInput()" autocomplete="off">
+      </div>
       <button class="btn btn-entrada" id="btn-entrada" onclick="registrar('Entrada')">✅ Registrar ENTRADA</button>
       <button class="btn btn-salida"  id="btn-salida"  onclick="registrar('Salida')">🚪 Registrar SALIDA</button>
       <button class="btn btn-cambiar" onclick="cambiarServicio()">↩ Cambiar servicio</button>
@@ -435,6 +440,18 @@
       { nombre: "Avellaneda",     dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" }
     ]
   };
+
+  // "Horas Extras" es un servicio extra que tienen TODOS los empleados,
+  // por encima de los suyos. No tiene dirección fija: el empleado la
+  // escribe al fichar (marca `custom: true`). Se suma por código para no
+  // repetirlo en cada empleado de SERVICIOS.
+  const HORAS_EXTRAS = { nombre: "Horas Extras", custom: true };
+
+  // Servicios que se muestran en la pestaña Registrar para el empleado
+  // actual: los suyos + "Horas Extras" al final.
+  function serviciosRegistro() {
+    return [...(SERVICIOS[currentUser] || []), HORAS_EXTRAS];
+  }
   // ============================================================
 
   let currentUser    = null;
@@ -601,19 +618,14 @@
 
   // ---------- RENDERIZAR SERVICIOS ----------
   function renderServices() {
-    const servicios = SERVICIOS[currentUser] || [];
+    const servicios = serviciosRegistro();
     const list = document.getElementById("service-list");
-
-    if (servicios.length === 0) {
-      list.innerHTML = `<p style="color:#888;font-size:14px;text-align:center;padding:20px 0;">No tenés servicios asignados.</p>`;
-      return;
-    }
 
     list.innerHTML = servicios.map((s, i) => `
       <button class="service-card" onclick="selectService(${i})">
         <div>
           <div class="s-nombre">${s.nombre}</div>
-          <div class="s-dir">${s.dir}</div>
+          <div class="s-dir">${s.custom ? "✍️ Escribís la dirección al fichar" : s.dir}</div>
         </div>
         <span class="s-arrow">›</span>
       </button>
@@ -622,13 +634,40 @@
 
   // ---------- SELECCIONAR SERVICIO ----------
   function selectService(index) {
-    const servicios = SERVICIOS[currentUser] || [];
+    const servicios = serviciosRegistro();
     selectedService = servicios[index];
     document.getElementById("sb-nombre").textContent = selectedService.nombre;
-    document.getElementById("sb-dir").textContent    = selectedService.dir;
+
+    const dirEl   = document.getElementById("sb-dir");
+    const heWrap  = document.getElementById("he-dir-wrap");
+    const heInput = document.getElementById("he-dir");
+    const btnE    = document.getElementById("btn-entrada");
+    const btnS    = document.getElementById("btn-salida");
+
+    if (selectedService.custom) {
+      // Horas Extras: ocultar dir fija, mostrar campo de dirección y
+      // bloquear Entrada/Salida hasta que escriban algo.
+      dirEl.style.display = "none";
+      heWrap.style.display = "block";
+      heInput.value = "";
+      btnE.disabled = btnS.disabled = true;
+    } else {
+      dirEl.style.display = "block";
+      dirEl.textContent   = selectedService.dir;
+      heWrap.style.display = "none";
+      btnE.disabled = btnS.disabled = false;
+    }
+
     document.getElementById("section-servicios").style.display = "none";
     document.getElementById("section-registro").style.display  = "block";
     document.getElementById("home-msg").textContent = "";
+  }
+
+  // Habilita Entrada/Salida solo cuando hay una dirección escrita (Horas Extras).
+  function onHeDirInput() {
+    const vacio = document.getElementById("he-dir").value.trim().length === 0;
+    document.getElementById("btn-entrada").disabled = vacio;
+    document.getElementById("btn-salida").disabled  = vacio;
   }
 
   // ---------- CAMBIAR SERVICIO ----------
@@ -645,6 +684,17 @@
     const btnE  = document.getElementById("btn-entrada");
     const btnS  = document.getElementById("btn-salida");
 
+    // Horas Extras: la dirección la escribe el empleado; el resto la trae el servicio.
+    const direccion = selectedService.custom
+      ? document.getElementById("he-dir").value.trim()
+      : selectedService.dir;
+
+    if (selectedService.custom && !direccion) {
+      msgEl.className = "error";
+      msgEl.textContent = "Ingresá la dirección de las horas extra.";
+      return;
+    }
+
     msgEl.className = "success";
     msgEl.textContent = "Guardando...";
     btnE.disabled = btnS.disabled = true;
@@ -654,7 +704,7 @@
       empleado:  currentUser,
       hash:      currentHash,
       servicio:  selectedService.nombre,
-      direccion: selectedService.dir,
+      direccion: direccion,
       tipo:      tipo,
       fecha:     now.toLocaleDateString("es-AR"),
       hora:      now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
@@ -753,7 +803,8 @@
     const sinServ = document.getElementById("mat-sin-servicio");
     const conServ = document.getElementById("mat-con-servicio");
 
-    if (!selectedService) {
+    // "Horas Extras" no pide materiales: obligar a elegir un servicio real.
+    if (!selectedService || selectedService.custom) {
       sinServ.style.display = "block";
       conServ.style.display = "none";
       const servicios = SERVICIOS[currentUser] || [];
