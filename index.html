@@ -1054,10 +1054,24 @@
     loadAdminResumen(false);
   }
 
-  // "dd/MM/yyyy" -> número comparable para ordenar días (más reciente primero).
+  // "d/M/yyyy" (con o sin cero de relleno) -> número comparable para
+  // ordenar días, más reciente primero.
   function fechaKey(f) {
-    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((f || "").trim());
-    return m ? Number(m[3] + m[2] + m[1]) : 0;
+    const p = (f || "").trim().split("/");
+    if (p.length !== 3) return 0;
+    return (+p[2] * 10000) + (+p[1] * 100) + (+p[0]);
+  }
+
+  // Hora -> segundos del día. Soporta 24h ("15:30:00") y 12h con
+  // a./p. m. ("03:50:12 p. m.") como las guarda el Sheet.
+  function horaKey(h) {
+    h = (h || "").toLowerCase();
+    const m = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(h);
+    if (!m) return 0;
+    let hh = +m[1];
+    if (/p\.?\s*m/.test(h) && hh < 12) hh += 12;
+    if (/a\.?\s*m/.test(h) && hh === 12) hh = 0;
+    return hh * 3600 + (+m[2]) * 60 + (+(m[3] || 0));
   }
 
   async function loadAdminResumen(forzar) {
@@ -1092,7 +1106,7 @@
     const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
     el.innerHTML = fechas.map(fecha => {
       const regs = grupos[fecha].slice().sort((a, b) =>
-        a.empleado === b.empleado ? (a.hora || "").localeCompare(b.hora || "")
+        a.empleado === b.empleado ? horaKey(a.hora) - horaKey(b.hora)
                                   : a.empleado.localeCompare(b.empleado));
       return `
       <div class="hist-day">
