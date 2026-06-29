@@ -409,7 +409,7 @@
   <!-- PASO 1: resumen diario de todos + lista de empleados -->
   <div id="admin-step-empleados">
     <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:12px;">📅 Ver todos los ingresos por día</button>
-    <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:18px;">📦 Ver todos los pedidos por día</button>
+    <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:18px;">📦 Ver todos los pedidos por lugar</button>
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
   </div>
@@ -417,7 +417,7 @@
   <!-- RESUMEN: todos los pedidos de materiales de todos, por día -->
   <div id="admin-step-pedidos" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
-    <div class="section-title" style="margin-top:16px;">Pedidos por día · todos los servicios</div>
+    <div class="section-title" style="margin-top:16px;">Pedidos por lugar · todos los servicios</div>
     <button class="btn-refresh" onclick="loadAdminPedidos(true)">🔄 Actualizar</button>
     <div id="admin-pedidos"></div>
   </div>
@@ -1337,8 +1337,9 @@
     }
   }
 
-  // Agrupa los pedidos por día (más reciente primero); dentro de cada día
-  // por horario. Cada fila: producto, servicio · empleado · hora, y acción.
+  // Agrupa los pedidos por servicio/lugar (todos los de un mismo lugar
+  // juntos); dentro de cada lugar, del más reciente al más viejo. Cada
+  // fila: producto, empleado · fecha · hora, y acción.
   function renderAdminPedidos(records) {
     const el = document.getElementById("admin-pedidos");
     if (!records.length) {
@@ -1346,19 +1347,21 @@
       return;
     }
     const grupos = {};
-    records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+    records.forEach(r => { (grupos[r.servicio] = grupos[r.servicio] || []).push(r); });
 
-    const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
-    el.innerHTML = fechas.map(fecha => {
-      const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
+    const servicios = Object.keys(grupos).sort((a, b) => a.localeCompare(b));
+    el.innerHTML = servicios.map(servicio => {
+      const regs = grupos[servicio].slice().sort((a, b) =>
+        fechaKey(b.fecha) === fechaKey(a.fecha) ? horaKey(b.hora) - horaKey(a.hora)
+                                                : fechaKey(b.fecha) - fechaKey(a.fecha));
       return `
       <div class="hist-day">
-        <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "pedido" : "pedidos"}</div>
+        <div class="hist-day-label">${servicio} · ${regs.length} ${regs.length === 1 ? "pedido" : "pedidos"}</div>
         ${regs.map(r => `
           <div class="hist-row ${r.accion === 'Pedido' ? 'salida' : 'entrada'}">
             <div>
               <div class="hr-serv">${r.producto}</div>
-              <div class="hr-hora">${r.servicio} · ${r.empleado}${r.hora ? " · " + r.hora : ""}</div>
+              <div class="hr-hora">${r.empleado} · ${r.fecha}${r.hora ? " " + r.hora : ""}</div>
             </div>
             <span class="badge badge-${r.accion === 'Pedido' ? 'salida' : 'entrada'}">${r.accion}</span>
           </div>
