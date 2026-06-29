@@ -408,9 +408,18 @@
 
   <!-- PASO 1: resumen diario de todos + lista de empleados -->
   <div id="admin-step-empleados">
-    <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:18px;">📅 Ver todos los ingresos por día</button>
+    <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:12px;">📅 Ver todos los ingresos por día</button>
+    <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:18px;">📦 Ver todos los pedidos por día</button>
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
+  </div>
+
+  <!-- RESUMEN: todos los pedidos de materiales de todos, por día -->
+  <div id="admin-step-pedidos" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Pedidos por día · todos los servicios</div>
+    <button class="btn-refresh" onclick="loadAdminPedidos(true)">🔄 Actualizar</button>
+    <div id="admin-pedidos"></div>
   </div>
 
   <!-- RESUMEN: todas las fichadas de todos, agrupadas por día -->
@@ -1044,6 +1053,7 @@
     document.getElementById("admin-step-servicios").style.display = step === "servicios" ? "block" : "none";
     document.getElementById("admin-step-registros").style.display = step === "registros" ? "block" : "none";
     document.getElementById("admin-step-resumen").style.display   = step === "resumen"   ? "block" : "none";
+    document.getElementById("admin-step-pedidos").style.display    = step === "pedidos"   ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -1105,9 +1115,7 @@
 
     const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
     el.innerHTML = fechas.map(fecha => {
-      const regs = grupos[fecha].slice().sort((a, b) =>
-        a.empleado === b.empleado ? horaKey(a.hora) - horaKey(b.hora)
-                                  : a.empleado.localeCompare(b.empleado));
+      const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
       return `
       <div class="hist-day">
         <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "registro" : "registros"}</div>
@@ -1301,6 +1309,62 @@
         `).join("")}
       </div>
     `).join("");
+  }
+
+  // ---------- RESUMEN DE PEDIDOS (todos los servicios juntos) ----------
+  let adminPedidosCache = null;
+
+  function openAdminPedidos() {
+    adminShowStep("pedidos");
+    loadAdminPedidos(false);
+  }
+
+  async function loadAdminPedidos(forzar) {
+    const el = document.getElementById("admin-pedidos");
+    if (adminPedidosCache && !forzar) { renderAdminPedidos(adminPedidosCache); return; }
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando pedidos...</div>`;
+    try {
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
+        action: "adminResumenPedidos", admin: currentUser, hash: currentHash
+      }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
+      if (json.status !== "ok") throw new Error(json.message || "No se pudo cargar.");
+      adminPedidosCache = json.records || [];
+      renderAdminPedidos(adminPedidosCache);
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  // Agrupa los pedidos por día (más reciente primero); dentro de cada día
+  // por horario. Cada fila: producto, servicio · empleado · hora, y acción.
+  function renderAdminPedidos(records) {
+    const el = document.getElementById("admin-pedidos");
+    if (!records.length) {
+      el.innerHTML = `<div class="hist-empty">No hay pedidos registrados.</div>`;
+      return;
+    }
+    const grupos = {};
+    records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+
+    const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
+    el.innerHTML = fechas.map(fecha => {
+      const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
+      return `
+      <div class="hist-day">
+        <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "pedido" : "pedidos"}</div>
+        ${regs.map(r => `
+          <div class="hist-row ${r.accion === 'Pedido' ? 'salida' : 'entrada'}">
+            <div>
+              <div class="hr-serv">${r.producto}</div>
+              <div class="hr-hora">${r.servicio} · ${r.empleado}${r.hora ? " · " + r.hora : ""}</div>
+            </div>
+            <span class="badge badge-${r.accion === 'Pedido' ? 'salida' : 'entrada'}">${r.accion}</span>
+          </div>
+        `).join("")}
+      </div>`;
+    }).join("");
   }
 
   // ---------- ARRANQUE ----------

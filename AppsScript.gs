@@ -362,6 +362,33 @@ function doGet(e) {
     }
   }
 
+  // ---- RESUMEN: TODOS los pedidos de materiales de TODOS los servicios ----
+  // Para que el admin vea todo el log junto (agrupado por día del lado del
+  // cliente) sin entrar servicio por servicio. Solo admins.
+  if (p.action === "adminResumenPedidos") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getHistorialPedidosSheet();
+      if (sheet.getLastRow() <= 1) {
+        return jsonOut({ status: "ok", records: [] });
+      }
+      const data = sheet.getDataRange().getValues();
+      const records = data.slice(1).map(row => ({
+        fecha:    fmtCell(row[0]),
+        hora:     fmtCell(row[1]),
+        empleado: row[2],
+        servicio: row[3],
+        producto: row[4],
+        accion:   row[5]
+      }));
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- HISTORIAL DE PEDIDOS de un servicio ----
   // Acepta auth de empleado o de admin (dueño que consulta).
   if (p.action === "historialPedidos" && p.servicio) {
