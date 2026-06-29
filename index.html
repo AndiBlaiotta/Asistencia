@@ -305,7 +305,6 @@
     <option value="Brisa Medina">Brisa Medina</option>
     <option value="Sabrina Scarampo">Sabrina Scarampo</option>
     <option value="Sabrina Yanel Dichito">Sabrina Yanel Dichito</option>
-    <option value="Alejandro Jelvez">Alejandro Jelvez</option>
     <option value="Rebeca Ayala">Rebeca Ayala</option>
     <optgroup label="Administración">
       <option value="Andrés Blaiotta">Andrés Blaiotta</option>
@@ -407,10 +406,19 @@
     <div style="font-size:12px;color:var(--gray);font-weight:600;margin-top:4px;">Panel de administración</div>
   </div>
 
-  <!-- PASO 1: lista de empleados -->
+  <!-- PASO 1: resumen diario de todos + lista de empleados -->
   <div id="admin-step-empleados">
-    <div class="section-title">Empleados</div>
+    <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:18px;">📅 Ver todos los ingresos por día</button>
+    <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
+  </div>
+
+  <!-- RESUMEN: todas las fichadas de todos, agrupadas por día -->
+  <div id="admin-step-resumen" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Ingresos por día · todos los empleados</div>
+    <button class="btn-refresh" onclick="loadAdminResumen(true)">🔄 Actualizar</button>
+    <div id="admin-resumen"></div>
   </div>
 
   <!-- PASO 2: servicios del empleado elegido -->
@@ -491,17 +499,13 @@
     "Sabrina Yanel Dichito": [
       { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
     ],
-    "Alejandro Jelvez": [
-      { nombre: "Del Himno",          dir: "Del Himno 124, Haedo, Buenos Aires" },
-      { nombre: "Rivadavia",          dir: "Rivadavia 16450, Haedo, Buenos Aires" },
-      { nombre: "República de Chile", dir: "República de Chile 1711, Villa Luzuriaga, Buenos Aires" }
-    ],
     "Rebeca Ayala": [
-      { nombre: "Mitre",          dir: "Mitre 2346, Castelar, Buenos Aires" },
-      { nombre: "San Martín",     dir: "San Martín 88, Morón, Buenos Aires" },
-      { nombre: "Mercedes",       dir: "Mercedes 1090, Castelar, Buenos Aires" },
-      { nombre: "Mariano Moreno", dir: "Mariano Moreno 215, Ramos Mejía, Buenos Aires" },
-      { nombre: "Avellaneda",     dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" }
+      { nombre: "Mitre",              dir: "Mitre 2346, Castelar, Buenos Aires" },
+      { nombre: "San Martín",         dir: "San Martín 88, Morón, Buenos Aires" },
+      { nombre: "Mercedes",           dir: "Mercedes 1090, Castelar, Buenos Aires" },
+      { nombre: "Avellaneda",         dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" },
+      { nombre: "Del Himno",          dir: "Del Himno 124, Haedo, Buenos Aires" },
+      { nombre: "Rivadavia",          dir: "Rivadavia 16450, Haedo, Buenos Aires" }
     ]
   };
 
@@ -1039,6 +1043,76 @@
     document.getElementById("admin-step-empleados").style.display = step === "empleados" ? "block" : "none";
     document.getElementById("admin-step-servicios").style.display = step === "servicios" ? "block" : "none";
     document.getElementById("admin-step-registros").style.display = step === "registros" ? "block" : "none";
+    document.getElementById("admin-step-resumen").style.display   = step === "resumen"   ? "block" : "none";
+  }
+
+  // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
+  let adminResumenCache = null;
+
+  function openAdminResumen() {
+    adminShowStep("resumen");
+    loadAdminResumen(false);
+  }
+
+  // "dd/MM/yyyy" -> número comparable para ordenar días (más reciente primero).
+  function fechaKey(f) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((f || "").trim());
+    return m ? Number(m[3] + m[2] + m[1]) : 0;
+  }
+
+  async function loadAdminResumen(forzar) {
+    const el = document.getElementById("admin-resumen");
+    if (adminResumenCache && !forzar) { renderAdminResumen(adminResumenCache); return; }
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando ingresos...</div>`;
+    try {
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
+        action: "adminResumen", admin: currentUser, hash: currentHash
+      }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
+      if (json.status !== "ok") throw new Error(json.message || "No se pudo cargar.");
+      adminResumenCache = json.records || [];
+      renderAdminResumen(adminResumenCache);
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  // Agrupa por día (más reciente primero); dentro de cada día ordena por
+  // empleado y hora. Cada fila: empleado, servicio · hora, tipo y GPS.
+  function renderAdminResumen(records) {
+    const el = document.getElementById("admin-resumen");
+    if (!records.length) {
+      el.innerHTML = `<div class="hist-empty">No hay ingresos registrados.</div>`;
+      return;
+    }
+    const grupos = {};
+    records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+
+    const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
+    el.innerHTML = fechas.map(fecha => {
+      const regs = grupos[fecha].slice().sort((a, b) =>
+        a.empleado === b.empleado ? (a.hora || "").localeCompare(b.hora || "")
+                                  : a.empleado.localeCompare(b.empleado));
+      return `
+      <div class="hist-day">
+        <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "registro" : "registros"}</div>
+        ${regs.map(r => `
+          <div class="hist-row ${(r.tipo || "").toLowerCase()}">
+            <div>
+              <div class="hr-serv">${r.empleado}</div>
+              <div class="hr-hora">${r.servicio}${r.hora ? " · " + r.hora : ""}</div>
+            </div>
+            <div class="hr-right">
+              <span class="badge badge-${(r.tipo || "").toLowerCase()}">${r.tipo}</span>
+              ${r.linkGPS && r.linkGPS !== "No disponible"
+                ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
+                : ``}
+            </div>
+          </div>
+        `).join("")}
+      </div>`;
+    }).join("");
   }
 
   // PASO 1: lista de todos los empleados.

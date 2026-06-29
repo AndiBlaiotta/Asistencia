@@ -65,7 +65,6 @@ const EMPLEADOS_HASH = {
   "Brisa Medina":            "63fb746a9789963a9f31559a34ba63475eb096e6c4c08399c107f7bba18eb847",
   "Sabrina Scarampo":        "8958b734a4f493cf3f7183d30975ac96fac11cab265cd6bbf49acc51888c726f",
   "Sabrina Yanel Dichito":   "ef9cf1f4ce31597bc00952a8b7d5839c2f8e96f302005ee2f0f188a16368877e",
-  "Alejandro Jelvez":        "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768f",
   "Rebeca Ayala":            "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69"
 };
 
@@ -210,6 +209,44 @@ function doGet(e) {
           lon:       lon,
           linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible"
         };
+      });
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- RESUMEN: TODAS las fichadas de TODOS los empleados juntas ----
+  // Para que el admin vea de un vistazo (agrupado por día del lado del
+  // cliente) todos los ingresos sin entrar empleado por empleado.
+  // Recorre todas las hojas del Sheet salvo las que no son de empleados,
+  // así también aparece el historial de empleados ya dados de baja.
+  if (p.action === "adminResumen") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const NO_EMPLEADOS = ["Materiales y productos", "Historial Pedidos"];
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const records = [];
+      ss.getSheets().forEach(sheet => {
+        const empleado = sheet.getName();
+        if (NO_EMPLEADOS.indexOf(empleado) !== -1) return;
+        if (sheet.getLastRow() <= 1) return;
+        const data = sheet.getDataRange().getValues();
+        data.slice(1).forEach(row => {
+          const lat = row[5], lon = row[6];
+          const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+          records.push({
+            empleado:  empleado,
+            fecha:     fmtCell(row[0]),
+            servicio:  row[1],
+            direccion: row[2],
+            tipo:      row[3],
+            hora:      fmtCell(row[4]),
+            linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible"
+          });
+        });
       });
       return jsonOut({ status: "ok", records });
     } catch (err) {
