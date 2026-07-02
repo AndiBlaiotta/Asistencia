@@ -31,7 +31,8 @@ const HEADERS = [
   "Latitud",
   "Longitud",
   "Link GPS",
-  "Precisión (m)"
+  "Precisión (m)",
+  "Estado"
 ];
 
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
@@ -64,8 +65,8 @@ const EMPLEADOS_HASH = {
   "Rocio Medina":            "2131c65bf715f3f1af43a56f798b5c2722b69aa25b0471a86b8b71501e458d47",
   "Brisa Medina":            "63fb746a9789963a9f31559a34ba63475eb096e6c4c08399c107f7bba18eb847",
   "Sabrina Scarampo":        "8958b734a4f493cf3f7183d30975ac96fac11cab265cd6bbf49acc51888c726f",
-  "Sabrina Yanel Dichito":   "ef9cf1f4ce31597bc00952a8b7d5839c2f8e96f302005ee2f0f188a16368877e",
-  "Rebeca Ayala":            "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69"
+  "Rebeca Ayala":            "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69",
+  "Alejandro Jelvez":        "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768f"
 };
 
 // Hash SHA-256 (hex) de la contraseña de cada dueño/administrador.
@@ -207,7 +208,8 @@ function doGet(e) {
           hora:      fmtCell(row[4]),
           lat:       lat,
           lon:       lon,
-          linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible"
+          linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
+          estado:    row[9] || ""
         };
       });
       return jsonOut({ status: "ok", records });
@@ -244,7 +246,8 @@ function doGet(e) {
             direccion: row[2],
             tipo:      row[3],
             hora:      fmtCell(row[4]),
-            linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible"
+            linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
+            estado:    row[9] || ""
           });
         });
       });
@@ -276,7 +279,8 @@ function doGet(e) {
         hora:     fmtCell(row[4]),
         lat:      row[5],
         lon:      row[6],
-        linkGPS:  typeof row[7] === "string" ? row[7] : (row[5] && row[6] ? `https://www.google.com/maps?q=${row[5]},${row[6]}` : "No disponible")
+        linkGPS:  typeof row[7] === "string" ? row[7] : (row[5] && row[6] ? `https://www.google.com/maps?q=${row[5]},${row[6]}` : "No disponible"),
+        estado:   row[9] || ""
       }));
 
       return jsonOut({ status: "ok", records });
@@ -462,6 +466,7 @@ function doGet(e) {
         sheet.setColumnWidth(4, 80);
         sheet.setColumnWidth(5, 100);
         sheet.setColumnWidth(8, 200);
+        sheet.setColumnWidth(10, 120);
       }
 
       const lastRow = sheet.getLastRow() + 1;
@@ -484,6 +489,15 @@ function doGet(e) {
       }
 
       sheet.getRange(lastRow, 9).setValue(precision || "No disponible");
+
+      // Estado de puntualidad: lo calcula el cliente contra el horario del
+      // servicio ("A tiempo" / "Tarde N min" / vacío si no aplica). Se
+      // resalta en ámbar/negrita cuando fue tarde.
+      const estado = p.estado || "";
+      const estadoCell = sheet.getRange(lastRow, 10).setValue(estado);
+      if (estado.indexOf("Tarde") === 0) {
+        estadoCell.setFontColor("#b45309").setFontWeight("bold");
+      }
 
       const rowRange = sheet.getRange(lastRow, 1, 1, HEADERS.length);
       if (tipo === "Entrada") {

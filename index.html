@@ -180,6 +180,7 @@
     }
     .badge-entrada { background: #dcfce7; color: #16a34a; }
     .badge-salida  { background: #fee2e2; color: #dc2626; }
+    .badge-tarde   { background: #fef3c7; color: #b45309; }
 
     /* ---- TABS ---- */
     .tab-bar {
@@ -304,8 +305,8 @@
     <option value="Rocio Medina">Rocio Medina</option>
     <option value="Brisa Medina">Brisa Medina</option>
     <option value="Sabrina Scarampo">Sabrina Scarampo</option>
-    <option value="Sabrina Yanel Dichito">Sabrina Yanel Dichito</option>
     <option value="Rebeca Ayala">Rebeca Ayala</option>
+    <option value="Alejandro Jelvez">Alejandro Jelvez</option>
     <optgroup label="Administración">
       <option value="Andrés Blaiotta">Andrés Blaiotta</option>
       <option value="Martín Fiorentino">Martín Fiorentino</option>
@@ -482,13 +483,23 @@
   // ============================================================
   // SERVICIOS por empleado
   // ============================================================
+  // Cada servicio: { nombre, dir, horario? }.
+  //   horario.texto  -> lo que se muestra al empleado y al admin.
+  //   horario.starts -> hora de inicio esperada por día de semana
+  //                     (0=Dom … 6=Sáb, "HH:MM"). Si un día no está en
+  //                     starts, ese día no se controla puntualidad.
+  // Servicio sin `horario` = libre: se ficha a cualquier hora, sin
+  // control de tardanza. El cálculo de "Tarde" está en calcularEstado().
   const SERVICIOS = {
     "Maria Decimas": [
-      { nombre: "Monteverde",  dir: "Monteverde 584, Castelar, Buenos Aires" },
-      { nombre: "Bayardi",     dir: "Bayardi 2519, Castelar, Buenos Aires" },
-      { nombre: "Elflein",     dir: "Elflein 2549, Castelar, Buenos Aires" },
-      { nombre: "Drago",       dir: "Drago 2561, Castelar, Buenos Aires" },
-      { nombre: "Azopardo",    dir: "Azopardo 1854, Castelar, Buenos Aires" }
+      { nombre: "Azopardo",   dir: "Azopardo 1854, Castelar, Buenos Aires",
+        horario: { texto: "Mar/Vie · 7:30–9:30", starts: { 2: "07:30", 5: "07:30" } } },
+      { nombre: "Bayardi",    dir: "Bayardi 2519, Castelar, Buenos Aires",
+        horario: { texto: "Lun/Mié 8–11 · Vie 10–13", starts: { 1: "08:00", 3: "08:00", 5: "10:00" } } },
+      { nombre: "Drago",      dir: "Drago 2561, Castelar, Buenos Aires",
+        horario: { texto: "Lun/Mié/Vie · 13–16", starts: { 1: "13:00", 3: "13:00", 5: "13:00" } } },
+      { nombre: "Monteverde", dir: "Monteverde 584, Castelar, Buenos Aires" },
+      { nombre: "Elflein",    dir: "Elflein 2549, Castelar, Buenos Aires" }
     ],
     "Celeste Freire": [
       { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires" }
@@ -500,22 +511,29 @@
       { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
     ],
     "Sabrina Scarampo": [
-      { nombre: "Santa Rosa",   dir: "Santa Rosa 1592, Ituzaingó, Buenos Aires" },
-      { nombre: "Jonte",        dir: "Jonte 330, Ramos Mejía, Buenos Aires" },
-      { nombre: "Suipacha",     dir: "Suipacha 209, Haedo, Buenos Aires" },
-      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires" }
-    ],
-    "Sabrina Yanel Dichito": [
       { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
     ],
     "Rebeca Ayala": [
-      { nombre: "Mitre",              dir: "Mitre 2346, Castelar, Buenos Aires" },
-      { nombre: "San Martín",         dir: "San Martín 88, Morón, Buenos Aires" },
-      { nombre: "Mercedes",           dir: "Mercedes 1090, Castelar, Buenos Aires" },
-      { nombre: "Avellaneda",         dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" },
-      { nombre: "Del Himno",          dir: "Del Himno 124, Haedo, Buenos Aires" },
-      { nombre: "Rivadavia",          dir: "Rivadavia 16450, Haedo, Buenos Aires" }
+      { nombre: "Mitre",        dir: "Mitre 2346, Castelar, Buenos Aires",
+        horario: { texto: "Mar/Jue/Sáb · 8–12", starts: { 2: "08:00", 4: "08:00", 6: "08:00" } } },
+      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires",
+        horario: { texto: "Mar/Vie · tarde (desde 12:30)", starts: { 2: "12:30", 5: "12:30" } } },
+      { nombre: "San Martín",   dir: "San Martín 88, Morón, Buenos Aires",
+        horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } },
+      { nombre: "Mercedes",     dir: "Mercedes 1090, Castelar, Buenos Aires" },
+      { nombre: "Avellaneda",   dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" }
+    ],
+    "Alejandro Jelvez": [
+      { nombre: "Del Himno",   dir: "Del Himno 124, Haedo, Buenos Aires",
+        horario: { texto: "Mar/Vie · 8–12", starts: { 2: "08:00", 5: "08:00" } } },
+      { nombre: "Rivadavia",   dir: "Rivadavia 16450, Haedo, Buenos Aires",
+        horario: { texto: "Mar/Vie · 12:30–15:30", starts: { 2: "12:30", 5: "12:30" } } },
+      { nombre: "Suipacha",    dir: "Suipacha 209, Haedo, Buenos Aires",
+        horario: { texto: "Lun/Jue · tarde (desde 12:30)", starts: { 1: "12:30", 4: "12:30" } } },
+      { nombre: "Santa Rosa",  dir: "Santa Rosa 1592, Ituzaingó, Buenos Aires" }
     ]
+    // "Jonte" (Ramos Mejía · Mar/Jue/Sáb mañana) queda EN PAUSA: choca con
+    // Mitre y no entra con el personal actual. Reasignar cuando se pueda.
   };
 
   // "Horas Extras" es un servicio extra que tienen TODOS los empleados,
@@ -535,6 +553,24 @@
   }
   // Servicios que se muestran en la pestaña Registrar para el empleado actual.
   function serviciosRegistro() { return serviciosDe(currentUser); }
+
+  // Tolerancia de tardanza (minutos) para las fichadas de Entrada.
+  const TOLERANCIA_TARDE_MIN = 10;
+
+  // Estado de puntualidad de una Entrada según el horario del servicio y
+  // la hora real (`now`). Devuelve:
+  //   ""          -> el servicio no tiene horario ese día (o es libre).
+  //   "A tiempo"  -> dentro de la tolerancia.
+  //   "Tarde N min" -> pasó el margen; N = minutos desde el inicio previsto.
+  function calcularEstado(servicio, now) {
+    const h = servicio && servicio.horario;
+    if (!h || !h.starts) return "";
+    const inicio = h.starts[now.getDay()];
+    if (!inicio) return "";
+    const [ih, im] = inicio.split(":").map(Number);
+    const diff = (now.getHours() * 60 + now.getMinutes()) - (ih * 60 + im);
+    return diff > TOLERANCIA_TARDE_MIN ? `Tarde ${diff} min` : "A tiempo";
+  }
   // ============================================================
 
   let currentUser    = null;
@@ -721,6 +757,7 @@
         <div>
           <div class="s-nombre">${s.nombre}</div>
           <div class="s-dir">${s.custom ? "✍️ Escribís la dirección al fichar" : s.dir}</div>
+          ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
         </div>
         <span class="s-arrow">›</span>
       </button>
@@ -748,7 +785,9 @@
       btnE.disabled = btnS.disabled = true;
     } else {
       dirEl.style.display = "block";
-      dirEl.textContent   = selectedService.dir;
+      dirEl.innerHTML = selectedService.dir + (selectedService.horario
+        ? `<br><span style="color:#4f46e5;font-weight:700;">🕐 ${selectedService.horario.texto}</span>`
+        : "");
       heWrap.style.display = "none";
       btnE.disabled = btnS.disabled = false;
     }
@@ -791,10 +830,13 @@
     }
 
     msgEl.className = "success";
+    msgEl.style.color = "";
     msgEl.textContent = "Guardando...";
     btnE.disabled = btnS.disabled = true;
 
     const now = new Date();
+    // La tardanza solo aplica a la Entrada (no a la Salida).
+    const estado = tipo === "Entrada" ? calcularEstado(selectedService, now) : "";
     const record = {
       empleado:  currentUser,
       hash:      currentHash,
@@ -805,7 +847,8 @@
       hora:      now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       lat:       currentCoords ? currentCoords.lat : "",
       lon:       currentCoords ? currentCoords.lon : "",
-      precision: currentCoords ? currentCoords.acc : ""
+      precision: currentCoords ? currentCoords.acc : "",
+      estado:    estado
     };
 
     try {
@@ -816,6 +859,11 @@
       if (json.status !== "ok") {
         msgEl.className = "error";
         msgEl.textContent = "❌ " + (json.message || "No se pudo guardar el registro.");
+      } else if (estado.startsWith("Tarde")) {
+        // Se guarda igual, pero avisamos que quedó registrada como tardía.
+        msgEl.className = "error";
+        msgEl.style.color = "#b45309";
+        msgEl.textContent = `⚠️ ${tipo} registrada en ${record.servicio} a las ${record.hora} — quedó marcada TARDE (${estado.replace("Tarde ", "")})`;
       } else {
         msgEl.textContent = `✅ ${tipo} registrada en ${record.servicio} a las ${record.hora}`;
       }
@@ -877,6 +925,9 @@
               </div>
               <div class="hr-right">
                 <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
+                ${r.estado && r.estado.startsWith('Tarde')
+                  ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
+                  : ''}
                 ${r.linkGPS && r.linkGPS !== 'No disponible'
                   ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                   : ''}
@@ -1127,6 +1178,9 @@
             </div>
             <div class="hr-right">
               <span class="badge badge-${(r.tipo || "").toLowerCase()}">${r.tipo}</span>
+              ${r.estado && r.estado.startsWith("Tarde")
+                ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
+                : ``}
               ${r.linkGPS && r.linkGPS !== "No disponible"
                 ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                 : ``}
@@ -1160,6 +1214,7 @@
         <div>
           <div class="s-nombre">${s.nombre}</div>
           <div class="s-dir">${s.custom ? "✍️ Dirección variable" : s.dir}</div>
+          ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
         </div>
         <span class="s-arrow">›</span>
       </button>
@@ -1301,6 +1356,9 @@
             </div>
             <div class="hr-right">
               <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
+              ${r.estado && r.estado.startsWith("Tarde")
+                ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
+                : ``}
               ${r.linkGPS && r.linkGPS !== "No disponible"
                 ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                 : ``}
