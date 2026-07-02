@@ -181,6 +181,7 @@
     .badge-entrada { background: #dcfce7; color: #16a34a; }
     .badge-salida  { background: #fee2e2; color: #dc2626; }
     .badge-tarde   { background: #fef3c7; color: #b45309; }
+    .badge-sinasignar { background: #e5e7eb; color: #4b5563; }
 
     /* ---- TABS ---- */
     .tab-bar {
@@ -413,6 +414,9 @@
     <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:18px;">📦 Ver todos los pedidos por lugar</button>
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
+
+    <div class="section-title" style="margin-top:22px;">⏸️ Servicios sin asignar</div>
+    <div id="admin-pendientes"></div>
   </div>
 
   <!-- RESUMEN: todos los pedidos de materiales de todos, por día -->
@@ -493,48 +497,70 @@
   const SERVICIOS = {
     "Maria Decimas": [
       { nombre: "Azopardo",   dir: "Azopardo 1854, Castelar, Buenos Aires",
-        horario: { texto: "Mar/Vie · 7:30–9:30", starts: { 2: "07:30", 5: "07:30" } } },
+        horario: { texto: "Mar/Vie · 8–10", starts: { 2: "08:00", 5: "08:00" } } },
       { nombre: "Bayardi",    dir: "Bayardi 2519, Castelar, Buenos Aires",
         horario: { texto: "Lun/Mié 8–11 · Vie 10–13", starts: { 1: "08:00", 3: "08:00", 5: "10:00" } } },
+      { nombre: "Elflein",    dir: "Elflein 2549, Castelar, Buenos Aires",
+        horario: { texto: "Mar/Jue · 10:30–13:30", starts: { 2: "10:30", 4: "10:30" } } },
       { nombre: "Drago",      dir: "Drago 2561, Castelar, Buenos Aires",
         horario: { texto: "Lun/Mié/Vie · 13–16", starts: { 1: "13:00", 3: "13:00", 5: "13:00" } } },
-      { nombre: "Monteverde", dir: "Monteverde 584, Castelar, Buenos Aires" },
-      { nombre: "Elflein",    dir: "Elflein 2549, Castelar, Buenos Aires" }
+      { nombre: "Monteverde", dir: "Monteverde 584, Castelar, Buenos Aires",
+        horario: { texto: "Mar/Jue · 13:40–16:40", starts: { 2: "13:40", 4: "13:40" } } }
     ],
     "Celeste Freire": [
-      { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires" }
+      { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires",
+        horario: { texto: "Lun a Vie 8–16 · Sáb 8–12",
+          starts: { 1: "08:00", 2: "08:00", 3: "08:00", 4: "08:00", 5: "08:00", 6: "08:00" } } }
     ],
     "Rocio Medina": [
-      { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires" }
+      { nombre: "Acorus", dir: "Av. Pres. Perón 10203, Villa Udaondo, Buenos Aires",
+        horario: { texto: "Lun a Vie 8–16 · Sáb 8–12",
+          starts: { 1: "08:00", 2: "08:00", 3: "08:00", 4: "08:00", 5: "08:00", 6: "08:00" } } }
     ],
     "Brisa Medina": [
-      { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
+      { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires",
+        horario: { texto: "Lun a Vie 7–14:30 · Sáb 7–11:30",
+          starts: { 1: "07:00", 2: "07:00", 3: "07:00", 4: "07:00", 5: "07:00", 6: "07:00" } } }
     ],
     "Sabrina Scarampo": [
-      { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires" }
+      { nombre: "Consultorios Médicos", dir: "Peatonal Eva Perón 827, Ituzaingó, Buenos Aires",
+        horario: { texto: "Lun a Vie 13:30–21 · Sáb 10:30–15",
+          starts: { 1: "13:30", 2: "13:30", 3: "13:30", 4: "13:30", 5: "13:30", 6: "10:30" } } }
     ],
     "Rebeca Ayala": [
-      { nombre: "Mitre",        dir: "Mitre 2346, Castelar, Buenos Aires",
+      { nombre: "Mitre",      dir: "Mitre 2346, Castelar, Buenos Aires",
         horario: { texto: "Mar/Jue/Sáb · 8–12", starts: { 2: "08:00", 4: "08:00", 6: "08:00" } } },
-      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires",
-        horario: { texto: "Mar/Vie · tarde (desde 12:30)", starts: { 2: "12:30", 5: "12:30" } } },
-      { nombre: "San Martín",   dir: "San Martín 88, Morón, Buenos Aires",
-        horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } },
-      { nombre: "Mercedes",     dir: "Mercedes 1090, Castelar, Buenos Aires" },
-      { nombre: "Avellaneda",   dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires" }
+      { nombre: "Santa Rosa", dir: "Santa Rosa 1592, Ituzaingó, Buenos Aires",
+        horario: { texto: "Lun/Mié/Vie · 8–12", starts: { 1: "08:00", 3: "08:00", 5: "08:00" } } },
+      { nombre: "Mercedes",   dir: "Mercedes 1090, Castelar, Buenos Aires",
+        horario: { texto: "Lun/Mié/Vie · 12:30–14:30", starts: { 1: "12:30", 3: "12:30", 5: "12:30" } } }
     ],
     "Alejandro Jelvez": [
-      { nombre: "Del Himno",   dir: "Del Himno 124, Haedo, Buenos Aires",
-        horario: { texto: "Mar/Vie · 8–12", starts: { 2: "08:00", 5: "08:00" } } },
-      { nombre: "Rivadavia",   dir: "Rivadavia 16450, Haedo, Buenos Aires",
+      { nombre: "Rivadavia",    dir: "Rivadavia 16450, Haedo, Buenos Aires",
+        horario: { texto: "Lun/Jue · 9–12", starts: { 1: "09:00", 4: "09:00" } } },
+      { nombre: "Suipacha",     dir: "Suipacha 209, Haedo, Buenos Aires",
+        horario: { texto: "Lun/Jue · 12:30–15:30", starts: { 1: "12:30", 4: "12:30" } } },
+      { nombre: "Del Himno",    dir: "Del Himno 124, Haedo, Buenos Aires",
+        horario: { texto: "Mar/Vie · 9–12", starts: { 2: "09:00", 5: "09:00" } } },
+      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires",
         horario: { texto: "Mar/Vie · 12:30–15:30", starts: { 2: "12:30", 5: "12:30" } } },
-      { nombre: "Suipacha",    dir: "Suipacha 209, Haedo, Buenos Aires",
-        horario: { texto: "Lun/Jue · tarde (desde 12:30)", starts: { 1: "12:30", 4: "12:30" } } },
-      { nombre: "Santa Rosa",  dir: "Santa Rosa 1592, Ituzaingó, Buenos Aires" }
+      { nombre: "San Martín",   dir: "San Martín 88, Morón, Buenos Aires",
+        horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } }
     ]
-    // "Jonte" (Ramos Mejía · Mar/Jue/Sáb mañana) queda EN PAUSA: choca con
-    // Mitre y no entra con el personal actual. Reasignar cuando se pueda.
   };
+
+  // Servicios SIN asignar: no están en la lista de ningún empleado (no se
+  // pueden fichar), pero se muestran en el panel de administradores con
+  // toda la info disponible y un cartel "Sin asignar".
+  //  - Avellaneda: servicio futuro, todavía sin días ni horario.
+  //  - Jonte: ya tiene días/horario, pero falta asignarle un empleado.
+  const PENDIENTES = [
+    { nombre: "Avellaneda", dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires",
+      nota: "Servicio futuro · todavía sin días ni horario definidos" },
+    { nombre: "Jonte", dir: "Jonte 330, Ramos Mejía, Buenos Aires",
+      horario: { texto: "Mar/Jue/Sáb · 8–12" },
+      nota: "Con días y horario, falta asignarle un empleado" }
+  ];
 
   // "Horas Extras" es un servicio extra que tienen TODOS los empleados,
   // por encima de los suyos. No tiene dirección fija: el empleado la
@@ -1201,6 +1227,20 @@
         <div><div class="s-nombre">${emp}</div></div>
         <span class="s-arrow">›</span>
       </button>
+    `).join("");
+
+    // Servicios sin asignar (solo lectura): no se fichan, se muestran acá
+    // con toda la info disponible y el cartel "Sin asignar".
+    document.getElementById("admin-pendientes").innerHTML = PENDIENTES.map(s => `
+      <div class="service-card" style="cursor:default;">
+        <div>
+          <div class="s-nombre">${s.nombre}</div>
+          <div class="s-dir">${s.dir}</div>
+          <div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario ? s.horario.texto : "Sin días/horario definidos"}</div>
+          ${s.nota ? `<div class="s-dir" style="margin-top:2px;">${s.nota}</div>` : ""}
+        </div>
+        <span class="badge badge-sinasignar">Sin asignar</span>
+      </div>
     `).join("");
   }
 
