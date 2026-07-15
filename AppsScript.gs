@@ -141,6 +141,51 @@ function getServicioCol(sheet, servicio) {
   return newCol;
 }
 
+// Configura la VISTA de la hoja "Materiales y productos" (no toca datos).
+// EJECUTAR A MANO UNA VEZ desde el editor de Apps Script (elegir esta
+// función en el selector y darle Run). No hace falta redeploy web.
+//   1. Congela la fila de servicios (fila 1) y las columnas Producto (A) y
+//      Total (B), así la lista de productos y su total quedan siempre a la
+//      vista mientras te movés a la derecha entre servicios.
+//   2. Inserta/mantiene la columna "Total" (B) que cuenta, por producto,
+//      cuántos servicios lo tienen PEDIDO en este momento (celdas "PEDIDO
+//      ..." de la col C en adelante). Se actualiza sola cuando se pide o se
+//      marca recibido, porque es una fórmula viva.
+// Es idempotente: se puede volver a correr sin duplicar la columna. Si algún
+// día agregás un producto nuevo (editar PRODUCTOS + redeploy), volvé a
+// correrla para que la fila nueva reciba su fórmula de Total.
+function setupMaterialesVista() {
+  const sheet = getMaterialesSheet();
+  const TOTAL_HEADER = "Total";
+
+  // ¿Ya existe la columna Total en B? Si no, la inserto empujando los
+  // servicios una posición a la derecha (getServicioCol los ubica por
+  // nombre, así que el corrimiento no rompe nada).
+  const b1 = (sheet.getRange(1, 2).getValue() || "").toString();
+  if (b1 !== TOTAL_HEADER) {
+    sheet.insertColumnBefore(2);
+    sheet.getRange(1, 2).setValue(TOTAL_HEADER)
+      .setFontWeight("bold").setBackground("#4f46e5").setFontColor("white")
+      .setHorizontalAlignment("center");
+    sheet.setColumnWidth(2, 80);
+  }
+
+  // (Re)escribo la fórmula de conteo por cada fila de producto. Cuenta las
+  // celdas de la col C hacia la derecha (los servicios) que empiezan con
+  // "PEDIDO". No incluye B, así que no hay referencia circular.
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const formulas = [];
+    for (let r = 2; r <= lastRow; r++) {
+      formulas.push(['=COUNTIF(C' + r + ':AZ' + r + ',"PEDIDO*")']);
+    }
+    sheet.getRange(2, 2, lastRow - 1, 1).setFormulas(formulas);
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(2);
+}
+
 // ---- "Historial Pedidos": log de cada pedido y cada recepción ----
 function getHistorialPedidosSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
