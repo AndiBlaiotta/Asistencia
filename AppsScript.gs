@@ -218,25 +218,32 @@ function doGet(e) {
     }
   }
 
-  // ---- RESUMEN: TODAS las fichadas de TODOS los empleados juntas ----
+  // ---- RESUMEN: fichadas RECIENTES de TODOS los empleados juntas ----
   // Para que el admin vea de un vistazo (agrupado por día del lado del
-  // cliente) todos los ingresos sin entrar empleado por empleado.
+  // cliente) los ingresos recientes sin entrar empleado por empleado.
   // Recorre todas las hojas del Sheet salvo las que no son de empleados,
   // así también aparece el historial de empleados ya dados de baja.
+  // Solo lee la COLA (últimas RESUMEN_TAIL filas) de cada hoja: el costo no
+  // crece con el histórico acumulado. El historial completo por empleado
+  // sigue disponible en el flujo "adminHistorial".
   if (p.action === "adminResumen") {
     if (!checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
       const NO_EMPLEADOS = ["Materiales y productos", "Historial Pedidos"];
+      const RESUMEN_TAIL = 120;
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const records = [];
       ss.getSheets().forEach(sheet => {
         const empleado = sheet.getName();
         if (NO_EMPLEADOS.indexOf(empleado) !== -1) return;
-        if (sheet.getLastRow() <= 1) return;
-        const data = sheet.getDataRange().getValues();
-        data.slice(1).forEach(row => {
+        const lastRow = sheet.getLastRow();
+        if (lastRow <= 1) return;
+        const numRows  = Math.min(lastRow - 1, RESUMEN_TAIL);
+        const startRow = lastRow - numRows + 1;
+        const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
+        data.forEach(row => {
           const lat = row[5], lon = row[6];
           const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
           records.push({
@@ -298,10 +305,19 @@ function doGet(e) {
     }
     try {
       const sheet = getMaterialesSheet();
-      const col   = getServicioCol(sheet, p.servicio);
+      const col   = getServicioCol(sheet, p.servicio); // 1-based; crea la columna si falta
+      // Una sola lectura de toda la grilla (antes: 16 lecturas de la col A,
+      // una por producto). Mapeo producto -> fila en memoria. Los productos
+      // que todavía no tienen fila se reportan como disponibles (la fila se
+      // crea recién al "pedir").
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+      const grid = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
+      const filaPorProducto = {};
+      grid.forEach(r => { filaPorProducto[r[0]] = r; });
       const productos = PRODUCTOS.map(nombre => {
-        const row   = getProductoRow(sheet, nombre);
-        const texto = (sheet.getRange(row, col).getValue() || "").toString();
+        const r     = filaPorProducto[nombre];
+        const texto = (r ? (r[col - 1] || "") : "").toString();
         const pedido = texto.indexOf("PEDIDO") === 0;
         return { nombre, estado: pedido ? "pedido" : "disponible", fecha: pedido ? texto.replace("PEDIDO ", "") : "" };
       });
