@@ -60,22 +60,40 @@ const PRODUCTOS = [
 
 const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto", "Acción", "Cantidad"];
 
-// Hash SHA-256 (hex) de la contraseña de cada empleado.
-// Generado a partir de las contraseñas originales con shasum -a 256.
-const EMPLEADOS_HASH = {
-  "Maria Decimas":           "626e3c805e77eeb472c42c6be607be2af7ac5c08fd7050f278e0330fe81abf57",
-  "Celeste Freire":          "22a9067d9bbd2104e0be07c6cc05be1de74d583ff4c2143248d2b67ca8c9f52f",
-  "Rocio Medina":            "2131c65bf715f3f1af43a56f798b5c2722b69aa25b0471a86b8b71501e458d47",
-  "Brisa Medina":            "63fb746a9789963a9f31559a34ba63475eb096e6c4c08399c107f7bba18eb847",
-  "Sabrina Scarampo":        "8958b734a4f493cf3f7183d30975ac96fac11cab265cd6bbf49acc51888c726f",
-  "Rebeca Ayala":            "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69",
-  "Alejandro Jelvez":        "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768f"
-};
+// ============================================================
+// AUTENTICACIÓN (self-service, con caducidad)
+// ============================================================
+// Los NOMBRES no son secretos (ya están en el frontend). Las CREDENCIALES sí:
+// viven en la hoja "Auth" (privada) como HMAC-SHA256(pepper, hashDelCliente),
+// con el pepper guardado en Script Properties (fuera del repo público). El
+// cliente manda SHA-256(password); el server nunca ve la contraseña en claro.
+// Cada usuario elige/cambia su propia contraseña; caduca a los 90 días.
 
-// Hash SHA-256 (hex) de la contraseña de cada dueño/administrador.
-// Los admins NO fichan ni piden materiales: solo pueden consultar las
-// fichadas de cualquier empleado (acción "adminHistorial").
-const ADMINS_HASH = {
+const EMPLEADOS = [
+  "Maria Decimas", "Celeste Freire", "Rocio Medina", "Brisa Medina",
+  "Sabrina Scarampo", "Rebeca Ayala", "Alejandro Jelvez"
+];
+const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
+
+// La contraseña caduca a los 90 días: en el próximo login el sistema obliga
+// a elegir una nueva.
+const PASSWORD_MAX_AGE_DAYS = 90;
+
+const AUTH_SHEET   = "Auth";
+const AUTH_HEADERS = ["Usuario", "Credencial", "FechaCambio", "CambioObligatorio"];
+
+// Hashes viejos (SHA-256) SOLO para la migración: sirven para sembrar la hoja
+// Auth (setupAuth) y como fallback hasta que cada usuario cambie su clave. Ya
+// están en la historia pública de git; se vuelven inútiles apenas cada uno
+// rota su contraseña. Se pueden borrar cuando todos hayan migrado.
+const LEGACY_HASH = {
+  "Maria Decimas":     "626e3c805e77eeb472c42c6be607be2af7ac5c08fd7050f278e0330fe81abf57",
+  "Celeste Freire":    "22a9067d9bbd2104e0be07c6cc05be1de74d583ff4c2143248d2b67ca8c9f52f",
+  "Rocio Medina":      "2131c65bf715f3f1af43a56f798b5c2722b69aa25b0471a86b8b71501e458d47",
+  "Brisa Medina":      "63fb746a9789963a9f31559a34ba63475eb096e6c4c08399c107f7bba18eb847",
+  "Sabrina Scarampo":  "8958b734a4f493cf3f7183d30975ac96fac11cab265cd6bbf49acc51888c726f",
+  "Rebeca Ayala":      "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69",
+  "Alejandro Jelvez":  "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768f",
   "Andrés Blaiotta":   "6487cd4b9c7bef8e1b25608d4b833726299c8e4fb59713ee9d21ead1e1958865",
   "Martín Fiorentino": "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36"
 };
@@ -86,12 +104,145 @@ function jsonOut(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function checkAuth(empleado, hash) {
-  return !!empleado && !!hash && EMPLEADOS_HASH[empleado] === hash;
+// Pepper secreto (Script Properties). setupAuth() lo crea si no existe.
+function getPepper() {
+  return PropertiesService.getScriptProperties().getProperty("AUTH_PEPPER");
 }
 
+// Credencial que se guarda/compara: HMAC-SHA256(pepper, hashDelCliente) en
+// base64. Devuelve null si todavía no hay pepper configurado.
+function credencial(clientHash) {
+  const pepper = getPepper();
+  if (!pepper) return null;
+  return Utilities.base64Encode(
+    Utilities.computeHmacSha256Signature(clientHash, pepper)
+  );
+}
+
+// Comparación en tiempo constante (no filtra info por timing).
+function tiempoConstanteIgual(a, b) {
+  a = (a || "").toString();
+  b = (b || "").toString();
+  if (a.length !== b.length) return false;
+  let dif = 0;
+  for (let i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return dif === 0;
+}
+
+function getAuthSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(AUTH_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(AUTH_SHEET);
+    sheet.appendRow(AUTH_HEADERS);
+    sheet.getRange(1, 1, 1, AUTH_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(2, 320);
+  }
+  return sheet;
+}
+
+// Lee la hoja Auth a un mapa usuario -> {cred, fecha, obligatorio, row}.
+function leerAuth() {
+  const sheet = getAuthSheet();
+  const map = {};
+  const last = sheet.getLastRow();
+  if (last <= 1) return { sheet, map };
+  const data = sheet.getRange(2, 1, last - 1, AUTH_HEADERS.length).getValues();
+  data.forEach((r, i) => {
+    const usuario = (r[0] || "").toString();
+    if (!usuario) return;
+    map[usuario] = {
+      cred:        (r[1] || "").toString(),
+      fecha:       (r[2] || "").toString(),
+      obligatorio: r[3] === true || (r[3] || "").toString().toLowerCase() === "true",
+      row:         i + 2
+    };
+  });
+  return { sheet, map };
+}
+
+function passwordVencida(fechaStr) {
+  const m = (fechaStr || "").toString().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return true; // sin fecha válida -> tratar como vencida
+  const fecha = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const dias = (new Date() - fecha) / (1000 * 60 * 60 * 24);
+  return dias > PASSWORD_MAX_AGE_DAYS;
+}
+
+// Verifica la credencial de un usuario. Devuelve { ok, mustChange }.
+function verificarUsuario(usuario, clientHash) {
+  if (!usuario || !clientHash) return { ok: false };
+  const { map } = leerAuth();
+  const entry = map[usuario];
+
+  if (entry && entry.cred) {
+    const cred = credencial(clientHash);
+    if (cred && tiempoConstanteIgual(cred, entry.cred)) {
+      return { ok: true, mustChange: entry.obligatorio || passwordVencida(entry.fecha) };
+    }
+    return { ok: false };
+  }
+
+  // Fallback de migración: usuario todavía no sembrado en Auth.
+  const legacy = LEGACY_HASH[usuario];
+  if (legacy && tiempoConstanteIgual(legacy, clientHash)) {
+    return { ok: true, mustChange: true };
+  }
+  return { ok: false };
+}
+
+function esEmpleado(u)     { return EMPLEADOS.indexOf(u) !== -1; }
+function esAdminNombre(u)  { return ADMINS.indexOf(u) !== -1; }
+
+// Usadas por los endpoints (post-login). Solo validan que la credencial
+// matchee; la caducidad se aplica en el login, no en cada request.
+function checkAuth(empleado, hash) {
+  return esEmpleado(empleado) && verificarUsuario(empleado, hash).ok;
+}
 function checkAdmin(admin, hash) {
-  return !!admin && !!hash && ADMINS_HASH[admin] === hash;
+  return esAdminNombre(admin) && verificarUsuario(admin, hash).ok;
+}
+
+// Guarda/actualiza la credencial de un usuario y resetea la fecha de cambio.
+function guardarCredencial(usuario, cred) {
+  const { sheet, map } = leerAuth();
+  const hoy   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  const entry = map[usuario];
+  const row   = entry ? entry.row : sheet.getLastRow() + 1;
+  sheet.getRange(row, 1).setValue(usuario);
+  sheet.getRange(row, 2).setNumberFormat("@").setValue(cred);
+  sheet.getRange(row, 3).setNumberFormat("@").setValue(hoy);
+  sheet.getRange(row, 4).setValue(false);
+}
+
+// EJECUTAR A MANO UNA VEZ desde el editor (Run) para inicializar la auth:
+//   1. Crea el pepper secreto en Script Properties si no existe.
+//   2. Crea la hoja "Auth" y siembra cada usuario con la credencial de su
+//      contraseña actual, marcada como "cambio obligatorio", para forzar que
+//      en su próximo login elija una contraseña nueva (así se rota lo viejo).
+// Idempotente: NO pisa a usuarios que ya tienen fila (los que ya cambiaron).
+function setupAuth() {
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty("AUTH_PEPPER")) {
+    props.setProperty("AUTH_PEPPER", Utilities.base64Encode(
+      Utilities.computeHmacSha256Signature(Utilities.getUuid(), Utilities.getUuid())
+    ));
+  }
+  const pepper = props.getProperty("AUTH_PEPPER");
+  const { sheet, map } = leerAuth();
+  Object.keys(LEGACY_HASH).forEach(usuario => {
+    if (map[usuario]) return; // ya sembrado / ya cambió -> no tocar
+    const cred = Utilities.base64Encode(
+      Utilities.computeHmacSha256Signature(LEGACY_HASH[usuario], pepper)
+    );
+    const row = sheet.getLastRow() + 1;
+    sheet.getRange(row, 1).setValue(usuario);
+    sheet.getRange(row, 2).setNumberFormat("@").setValue(cred);
+    sheet.getRange(row, 3).setNumberFormat("@").setValue("2000-01-01"); // vieja -> vencida
+    sheet.getRange(row, 4).setValue(true);                              // cambio obligatorio
+  });
 }
 
 // Sheets auto-convierte texto tipo fecha/hora a su propio tipo Date.
@@ -284,13 +435,44 @@ function doGet(e) {
   // ---- LOGIN: solo valida credenciales, no escribe nada ----
   // Devuelve el rol para que el cliente sepa qué pantalla mostrar.
   if (p.action === "login") {
-    if (checkAdmin(p.empleado, p.hash)) {
-      return jsonOut({ status: "ok", role: "admin" });
-    }
-    if (checkAuth(p.empleado, p.hash)) {
-      return jsonOut({ status: "ok", role: "empleado" });
+    const usuario = p.empleado;
+    const role = esAdminNombre(usuario) ? "admin" : (esEmpleado(usuario) ? "empleado" : null);
+    if (role) {
+      const res = verificarUsuario(usuario, p.hash);
+      if (res.ok) {
+        return jsonOut({ status: "ok", role, mustChangePassword: !!res.mustChange });
+      }
     }
     return jsonOut({ status: "error", message: "Usuario o contraseña incorrectos" });
+  }
+
+  // ---- CAMBIAR CONTRASEÑA (self-service) ----
+  // El usuario manda su hash actual y el nuevo (SHA-256 hex). Se verifica el
+  // actual, se guarda el nuevo (HMAC) y se resetea la fecha de caducidad.
+  if (p.action === "cambiarPassword" && p.empleado && p.hash && p.nuevoHash) {
+    const usuario = p.empleado;
+    if (!esEmpleado(usuario) && !esAdminNombre(usuario)) {
+      return jsonOut({ status: "error", message: "Usuario inválido" });
+    }
+    if (!verificarUsuario(usuario, p.hash).ok) {
+      return jsonOut({ status: "error", message: "Contraseña actual incorrecta" });
+    }
+    if (!/^[0-9a-f]{64}$/.test(p.nuevoHash)) {
+      return jsonOut({ status: "error", message: "Contraseña nueva inválida" });
+    }
+    if (tiempoConstanteIgual(p.nuevoHash, p.hash)) {
+      return jsonOut({ status: "error", message: "La nueva contraseña no puede ser igual a la actual" });
+    }
+    const nuevaCred = credencial(p.nuevoHash);
+    if (!nuevaCred) {
+      return jsonOut({ status: "error", message: "Falta inicializar la auth (correr setupAuth)" });
+    }
+    try {
+      guardarCredencial(usuario, nuevaCred);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
   }
 
   // ---- ADMIN: historial de fichadas de cualquier empleado (solo dueños) ----
@@ -644,9 +826,9 @@ function doGet(e) {
 
       const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-      // El empleado ya está validado contra EMPLEADOS_HASH, así que la
-      // hoja solo se crea para empleados reales (no se puede inyectar
-      // un nombre arbitrario para generar hojas nuevas).
+      // El empleado ya está validado (checkAuth), así que la hoja solo se
+      // crea para empleados reales (no se puede inyectar un nombre
+      // arbitrario para generar hojas nuevas).
       let sheet = ss.getSheetByName(empleado);
       if (!sheet) {
         sheet = ss.insertSheet(empleado);

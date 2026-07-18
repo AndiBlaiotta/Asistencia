@@ -342,6 +342,25 @@
   <div id="login-error" class="error"></div>
 </div>
 
+<!-- ==================== CAMBIAR CONTRASEÑA ==================== -->
+<div id="screen-password" class="card" style="display:none;">
+  <div class="logo">
+    <img src="Blue With Sparkles Cleaning Service Logo .png" alt="TRAPO" style="width:180px; height:auto;">
+    <p class="tagline">Cambiar contraseña</p>
+  </div>
+  <div id="pw-motivo" style="text-align:center;color:var(--gray);font-weight:600;font-size:13px;margin-bottom:6px;"></div>
+  <div id="pw-usuario" style="text-align:center;font-weight:700;margin-bottom:14px;"></div>
+
+  <label for="inp-pw-nueva">Nueva contraseña</label>
+  <input type="password" id="inp-pw-nueva" placeholder="mínimo 6 caracteres">
+  <label for="inp-pw-conf">Repetir contraseña</label>
+  <input type="password" id="inp-pw-conf" placeholder="repetí la contraseña">
+
+  <button class="btn btn-primary" onclick="cambiarPassword()">Guardar y entrar</button>
+  <button class="btn btn-cambiar" id="pw-cancelar" onclick="cancelarCambioPassword()" style="margin-top:8px;">Cancelar</button>
+  <div id="pw-error" class="error"></div>
+</div>
+
 <!-- ==================== HOME ==================== -->
 <div id="screen-home" class="card">
 
@@ -416,7 +435,8 @@
     <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
   </div>
 
-  <button class="btn btn-logout" onclick="logout()" style="margin-top:20px;">Cerrar sesión</button>
+  <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
+  <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
 </div>
 
 <!-- ==================== ADMIN (dueños) ==================== -->
@@ -505,7 +525,8 @@
     </div>
   </div>
 
-  <button class="btn btn-logout" onclick="logout()" style="margin-top:20px;">Cerrar sesión</button>
+  <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
+  <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
 </div>
 
 <script>
@@ -730,6 +751,15 @@
         return;
       }
 
+      // La contraseña venció o es la de arranque: obligar a cambiarla.
+      if (json.mustChangePassword) {
+        startCambioPassword({
+          user: nombre, hash, role: json.role, forced: true,
+          motivo: "Por seguridad tenés que elegir una contraseña nueva para continuar."
+        });
+        return;
+      }
+
       saveSession(nombre, hash, json.role);
       if (json.role === "admin") enterAdmin(nombre, hash);
       else                       enterApp(nombre, hash);
@@ -737,6 +767,81 @@
       errEl.textContent = "❌ No se pudo verificar: " + e.message;
     } finally {
       btnLogin.disabled = false;
+    }
+  }
+
+  // ---------- CAMBIO DE CONTRASEÑA (self-service) ----------
+  let pwState = null; // { user, hash, role, forced }
+
+  function startCambioPassword(opts) {
+    pwState = opts;
+    document.getElementById("inp-pw-nueva").value = "";
+    document.getElementById("inp-pw-conf").value  = "";
+    document.getElementById("pw-error").textContent  = "";
+    document.getElementById("pw-motivo").textContent = opts.motivo || "";
+    document.getElementById("pw-usuario").textContent = opts.user;
+    // En el cambio obligatorio no se puede cancelar.
+    document.getElementById("pw-cancelar").style.display = opts.forced ? "none" : "block";
+    ["screen-login", "screen-home", "screen-admin"].forEach(id =>
+      document.getElementById(id).style.display = "none");
+    document.getElementById("screen-password").style.display = "block";
+  }
+
+  // Cambio voluntario desde adentro de la app.
+  function pedirCambioPassword() {
+    const role = ADMINS.includes(currentUser) ? "admin" : "empleado";
+    startCambioPassword({
+      user: currentUser, hash: currentHash, role, forced: false,
+      motivo: "Elegí tu nueva contraseña."
+    });
+  }
+
+  function cancelarCambioPassword() {
+    const role = pwState && pwState.role;
+    pwState = null;
+    document.getElementById("screen-password").style.display = "none";
+    document.getElementById(role === "admin" ? "screen-admin" : "screen-home").style.display = "block";
+  }
+
+  async function cambiarPassword() {
+    const nueva = document.getElementById("inp-pw-nueva").value;
+    const conf  = document.getElementById("inp-pw-conf").value;
+    const errEl = document.getElementById("pw-error");
+    errEl.textContent = "";
+
+    if (nueva.length < 6)  { errEl.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+    if (nueva !== conf)    { errEl.textContent = "Las contraseñas no coinciden."; return; }
+
+    const btn = document.querySelector("#screen-password .btn-primary");
+    btn.disabled = true;
+    try {
+      const nuevoHash = await sha256Hex(nueva);
+      if (nuevoHash === pwState.hash) {
+        errEl.textContent = "La nueva contraseña no puede ser igual a la actual.";
+        return;
+      }
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
+        action: "cambiarPassword", empleado: pwState.user, hash: pwState.hash, nuevoHash
+      }).toString();
+      const res  = await fetch(url, { redirect: "follow" });
+      const json = await res.json();
+      if (json.status !== "ok") {
+        errEl.textContent = json.message || "No se pudo cambiar la contraseña.";
+        return;
+      }
+      // Éxito: la credencial cambió, actualizo memoria + sesión y entro.
+      const user = pwState.user, role = pwState.role;
+      currentUser = user;
+      currentHash = nuevoHash;
+      saveSession(user, nuevoHash, role);
+      pwState = null;
+      document.getElementById("screen-password").style.display = "none";
+      if (role === "admin") enterAdmin(user, nuevoHash);
+      else                  enterApp(user, nuevoHash);
+    } catch (e) {
+      errEl.textContent = "❌ Error: " + e.message;
+    } finally {
+      btn.disabled = false;
     }
   }
 
