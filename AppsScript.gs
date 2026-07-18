@@ -35,6 +35,10 @@ const HEADERS = [
   "Estado"
 ];
 
+// Hojas que NO son de empleados (no llevan fichadas): se saltean al recorrer
+// todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
+const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth"];
+
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
 const PRODUCTOS = [
   'Guantes "Steff"',
@@ -429,6 +433,105 @@ function normalizarCantidad(raw) {
   return n;
 }
 
+// ============================================================
+// HORARIOS (validación server-side de fichadas)
+// ============================================================
+// ⚠️ DUPLICADO A PROPÓSITO: el frontend tiene los horarios en `SERVICIOS`
+// (index.html) para mostrar y calcular tardanza. Acá va la copia
+// AUTORITATIVA que valida server-side que la fichada caiga en un día y
+// horario que le corresponden (no burlable desde el cliente). Si cambiás un
+// horario, actualizá LOS DOS lugares. Formato: HORARIOS[empleado][servicio] =
+// { diaSemana: ["HH:MM inicio", "HH:MM fin"] }, con día 0=Dom … 6=Sáb.
+// Servicios sin entrada acá (ej. "Horas Extras") = libres, se fichan cuando sea.
+const HORARIOS = {
+  "Maria Decimas": {
+    "Azopardo":   { 2: ["08:00", "10:00"], 5: ["08:00", "10:00"] },
+    "Bayardi":    { 1: ["08:00", "11:00"], 3: ["08:00", "11:00"], 5: ["10:00", "13:00"] },
+    "Elflein":    { 2: ["10:30", "13:30"], 4: ["10:30", "13:30"] },
+    "Drago":      { 1: ["13:00", "16:00"], 3: ["13:00", "16:00"], 5: ["13:00", "16:00"] },
+    "Monteverde": { 2: ["13:40", "16:40"], 4: ["13:40", "16:40"] }
+  },
+  "Celeste Freire": {
+    "Acorus": { 1: ["08:00", "16:00"], 2: ["08:00", "16:00"], 3: ["08:00", "16:00"],
+                4: ["08:00", "16:00"], 5: ["08:00", "16:00"], 6: ["08:00", "12:00"] }
+  },
+  "Rocio Medina": {
+    "Acorus": { 1: ["08:00", "16:00"], 2: ["08:00", "16:00"], 3: ["08:00", "16:00"],
+                4: ["08:00", "16:00"], 5: ["08:00", "16:00"], 6: ["08:00", "12:00"] }
+  },
+  "Brisa Medina": {
+    "Consultorios Médicos": { 1: ["07:00", "14:30"], 2: ["07:00", "14:30"], 3: ["07:00", "14:30"],
+                              4: ["07:00", "14:30"], 5: ["07:00", "14:30"], 6: ["07:00", "11:30"] }
+  },
+  "Sabrina Scarampo": {
+    "Consultorios Médicos": { 1: ["13:30", "21:00"], 2: ["13:30", "21:00"], 3: ["13:30", "21:00"],
+                              4: ["13:30", "21:00"], 5: ["13:30", "21:00"], 6: ["10:30", "15:00"] }
+  },
+  "Rebeca Ayala": {
+    "Mitre":      { 2: ["08:00", "12:00"], 4: ["08:00", "12:00"], 6: ["08:00", "12:00"] },
+    "Santa Rosa": { 1: ["08:00", "12:00"], 3: ["08:00", "12:00"], 5: ["08:00", "12:00"] },
+    "Mercedes":   { 1: ["12:30", "14:30"], 3: ["12:30", "14:30"], 5: ["12:30", "14:30"] }
+  },
+  "Alejandro Jelvez": {
+    "Rivadavia":    { 1: ["09:00", "12:00"], 4: ["09:00", "12:00"] },
+    "Suipacha":     { 2: ["12:30", "15:30"], 5: ["12:30", "15:30"] },
+    "Del Himno":    { 2: ["09:00", "12:00"], 5: ["09:00", "12:00"] },
+    "Garcia Silva": { 1: ["12:30", "15:30"], 4: ["12:30", "15:30"] },
+    "San Martín":   { 1: ["16:00", "18:00"], 3: ["16:00", "18:00"], 5: ["16:00", "18:00"] }
+  }
+};
+
+// Margen para fichar antes del inicio / después del fin del turno.
+const TOLERANCIA_ANTES_MIN   = 30;
+const TOLERANCIA_DESPUES_MIN = 60;
+const DIAS_NOMBRE = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
+
+function horaAMin(hora) {
+  const m = (hora || "").toString().match(/^(\d{1,2}):(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+}
+
+// Día de la semana (0=Dom … 6=Sáb) a partir de "d/M/yyyy" (formato es-AR).
+function diaDeSemana(fecha) {
+  const m = (fecha || "").toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!m) return NaN;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getDay();
+}
+
+// Valida que la fichada caiga en un día/horario que le corresponde al empleado
+// para ese servicio. Usa fecha/hora reportadas por el cliente (consistente con
+// el cálculo de tardanza, que también es client-side). Devuelve { ok, message }.
+function validarHorarioFichada(empleado, servicio, fecha, hora) {
+  const servHor = (HORARIOS[empleado] || {})[servicio];
+  if (!servHor) return { ok: true }; // sin horario definido (ej. Horas Extras) = libre
+  const dow = diaDeSemana(fecha);
+  const rango = servHor[dow];
+  if (!rango) {
+    return { ok: false, message: `No tenés turno en "${servicio}" los ${DIAS_NOMBRE[dow] || "ese día"}.` };
+  }
+  const min = horaAMin(hora);
+  if (isNaN(min)) return { ok: true }; // sin hora válida: no bloqueo por horario
+  const ini = horaAMin(rango[0]);
+  const fin = horaAMin(rango[1]);
+  if (min < ini - TOLERANCIA_ANTES_MIN || min > fin + TOLERANCIA_DESPUES_MIN) {
+    return { ok: false, message: `Fuera del horario de "${servicio}" (${rango[0]}–${rango[1]}).` };
+  }
+  return { ok: true };
+}
+
+// Último tipo de fichada ("Entrada"/"Salida"/null) para un servicio en la hoja
+// del empleado. Sirve para no permitir dos entradas seguidas ni una salida sin
+// entrada previa.
+function ultimoTipoServicio(sheet, servicio) {
+  const last = sheet.getLastRow();
+  if (last <= 1) return null;
+  const vals = sheet.getRange(2, 2, last - 1, 3).getValues(); // cols 2(Servicio) 3(Dir) 4(Tipo)
+  for (let i = vals.length - 1; i >= 0; i--) {
+    if ((vals[i][0] || "").toString() === servicio) return (vals[i][2] || "").toString();
+  }
+  return null;
+}
+
 function doGet(e) {
   const p = e.parameter || {};
 
@@ -521,13 +624,12 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const NO_EMPLEADOS = ["Materiales y productos", "Historial Pedidos"];
       const RESUMEN_TAIL = 120;
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const records = [];
       ss.getSheets().forEach(sheet => {
         const empleado = sheet.getName();
-        if (NO_EMPLEADOS.indexOf(empleado) !== -1) return;
+        if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
         const lastRow = sheet.getLastRow();
         if (lastRow <= 1) return;
         const numRows  = Math.min(lastRow - 1, RESUMEN_TAIL);
@@ -545,6 +647,45 @@ function doGet(e) {
             hora:      fmtCell(row[4]),
             linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
             estado:    row[9] || ""
+          });
+        });
+      });
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- TARDANZAS: todas las llegadas tarde de todos los empleados ----
+  // Recorre las hojas de empleados (cola de TARDANZAS_TAIL filas) y junta las
+  // Entradas marcadas "Tarde N min". El cliente agrupa por día y arma el
+  // resumen mensual. Solo admins.
+  if (p.action === "adminTardanzas") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const TARDANZAS_TAIL = 500;
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const records = [];
+      ss.getSheets().forEach(sheet => {
+        const empleado = sheet.getName();
+        if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
+        const lastRow = sheet.getLastRow();
+        if (lastRow <= 1) return;
+        const numRows  = Math.min(lastRow - 1, TARDANZAS_TAIL);
+        const startRow = lastRow - numRows + 1;
+        const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
+        data.forEach(row => {
+          const estado = (row[9] || "").toString();
+          const m = estado.match(/Tarde\s+(\d+)/);
+          if (!m) return;
+          records.push({
+            empleado: empleado,
+            servicio: row[1],
+            fecha:    fmtCell(row[0]),
+            hora:     fmtCell(row[4]),
+            minutos:  Number(m[1])
           });
         });
       });
@@ -830,6 +971,25 @@ function doGet(e) {
       // crea para empleados reales (no se puede inyectar un nombre
       // arbitrario para generar hojas nuevas).
       let sheet = ss.getSheetByName(empleado);
+
+      // ---- Validaciones de la fichada (antes de escribir nada) ----
+      // Regla C: día/horario que le corresponde al empleado en ese servicio.
+      const vHor = validarHorarioFichada(empleado, servicio, fecha, hora);
+      if (!vHor.ok) {
+        return jsonOut({ status: "error", message: vHor.message });
+      }
+      // Reglas A/B: no dos entradas seguidas ni una salida sin entrada previa
+      // (mirando la última fichada de ESE servicio en la hoja del empleado).
+      const ultimo = sheet ? ultimoTipoServicio(sheet, servicio) : null;
+      if (tipo === "Entrada" && ultimo === "Entrada") {
+        return jsonOut({ status: "error",
+          message: `Ya marcaste una entrada en "${servicio}" sin salida. Marcá la salida primero.` });
+      }
+      if (tipo === "Salida" && ultimo !== "Entrada") {
+        return jsonOut({ status: "error",
+          message: `No hay una entrada abierta en "${servicio}". Marcá la entrada primero.` });
+      }
+
       if (!sheet) {
         sheet = ss.insertSheet(empleado);
         const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
