@@ -157,8 +157,9 @@ function getServicioCol(sheet, servicio) {
 //   3. Migra pedidos viejos sin cantidad ("PEDIDO dd/mm" -> "PEDIDO 1 dd/mm")
 //      para que la suma de unidades sea correcta.
 // Es idempotente: se puede volver a correr sin duplicar la columna ni la
-// migración. Si algún día agregás un producto nuevo (editar PRODUCTOS +
-// redeploy), volvé a correrla para que la fila nueva reciba su fórmula.
+// migración. Crea las filas faltantes de PRODUCTOS, así que cada vez que
+// agregás un producto nuevo (editar PRODUCTOS + redeploy) alcanza con volver
+// a correrla para que la fila nueva se cree y reciba su fórmula de Total.
 function setupMaterialesVista() {
   const sheet = getMaterialesSheet();
   const TOTAL_HEADER = "Total";
@@ -174,6 +175,11 @@ function setupMaterialesVista() {
       .setHorizontalAlignment("center");
     sheet.setColumnWidth(2, 80);
   }
+
+  // Me aseguro de que TODOS los productos de PRODUCTOS tengan su fila (las
+  // filas se crean lazy al primer "pedir"; los productos nuevos que nadie
+  // pidió todavía no tienen fila y por lo tanto no reciben fórmula de Total).
+  PRODUCTOS.forEach(p => getProductoRow(sheet, p));
 
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
