@@ -52,10 +52,13 @@ const PRODUCTOS = [
   'Prod. ascensor/metales "Venus" 425ml',
   'Desodorante de ambiente "Odorite"',
   'Bolsa de consorcio 90x120 50 unidades',
-  'Detergente limón "Starbel" 5 lts'
+  'Detergente limón "Starbel" 5 lts',
+  'Guantes institucionales negros super reforzados "Jorgito"',
+  'Desinfectante amonio cuaternario Antibactervid19 x 5 lt',
+  'Desengrasante Cocina Cif ultra rapido x 5 lts'
 ];
 
-const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto", "Acción"];
+const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto", "Acción", "Cantidad"];
 
 // Hash SHA-256 (hex) de la contraseña de cada empleado.
 // Generado a partir de las contraseñas originales con shasum -a 256.
@@ -141,19 +144,21 @@ function getServicioCol(sheet, servicio) {
   return newCol;
 }
 
-// Configura la VISTA de la hoja "Materiales y productos" (no toca datos).
+// Configura la VISTA de la hoja "Materiales y productos" (no toca datos de
+// pedidos, salvo la migración puntual del punto 3).
 // EJECUTAR A MANO UNA VEZ desde el editor de Apps Script (elegir esta
 // función en el selector y darle Run). No hace falta redeploy web.
 //   1. Congela la fila de servicios (fila 1) y las columnas Producto (A) y
 //      Total (B), así la lista de productos y su total quedan siempre a la
 //      vista mientras te movés a la derecha entre servicios.
-//   2. Inserta/mantiene la columna "Total" (B) que cuenta, por producto,
-//      cuántos servicios lo tienen PEDIDO en este momento (celdas "PEDIDO
-//      ..." de la col C en adelante). Se actualiza sola cuando se pide o se
-//      marca recibido, porque es una fórmula viva.
-// Es idempotente: se puede volver a correr sin duplicar la columna. Si algún
-// día agregás un producto nuevo (editar PRODUCTOS + redeploy), volvé a
-// correrla para que la fila nueva reciba su fórmula de Total.
+//   2. Inserta/mantiene la columna "Total" (B) que SUMA las unidades
+//      pendientes de ese producto (celdas "PEDIDO n ..." y "COMPRADO n ..."
+//      de la col C en adelante). Es una fórmula viva: se actualiza sola.
+//   3. Migra pedidos viejos sin cantidad ("PEDIDO dd/mm" -> "PEDIDO 1 dd/mm")
+//      para que la suma de unidades sea correcta.
+// Es idempotente: se puede volver a correr sin duplicar la columna ni la
+// migración. Si algún día agregás un producto nuevo (editar PRODUCTOS +
+// redeploy), volvé a correrla para que la fila nueva reciba su fórmula.
 function setupMaterialesVista() {
   const sheet = getMaterialesSheet();
   const TOTAL_HEADER = "Total";
@@ -170,14 +175,33 @@ function setupMaterialesVista() {
     sheet.setColumnWidth(2, 80);
   }
 
-  // (Re)escribo la fórmula de conteo por cada fila de producto. Cuenta las
-  // celdas de la col C hacia la derecha (los servicios) que empiezan con
-  // "PEDIDO". No incluye B, así que no hay referencia circular.
   const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  // Migración: pedidos/comprados viejos sin cantidad -> les pongo cantidad 1.
+  if (lastRow >= 2 && lastCol >= 3) {
+    const rango  = sheet.getRange(2, 3, lastRow - 1, lastCol - 2); // grilla de servicios
+    const vals   = rango.getValues();
+    let cambio   = false;
+    for (let i = 0; i < vals.length; i++) {
+      for (let j = 0; j < vals[i].length; j++) {
+        const t = (vals[i][j] || "").toString();
+        const m = t.match(/^(PEDIDO|COMPRADO)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/);
+        if (m) { vals[i][j] = m[1] + " 1 " + m[2]; cambio = true; }
+      }
+    }
+    if (cambio) { rango.setNumberFormat("@"); rango.setValues(vals); }
+  }
+
+  // (Re)escribo la fórmula de la col B por cada fila de producto: suma las
+  // unidades de las celdas "PEDIDO n ..." / "COMPRADO n ..." de la col C en
+  // adelante. REGEXEXTRACT saca el número que va entre espacios (la cantidad);
+  // la fecha no matchea porque no tiene espacio después. No incluye B, así
+  // que no hay referencia circular.
   if (lastRow >= 2) {
     const formulas = [];
     for (let r = 2; r <= lastRow; r++) {
-      formulas.push(['=COUNTIF(C' + r + ':AZ' + r + ',"PEDIDO*")']);
+      formulas.push(['=SUM(ARRAYFORMULA(IFERROR(REGEXEXTRACT(C' + r + ':AZ' + r + '&""," (\\d+) ")+0,0)))']);
     }
     sheet.getRange(2, 2, lastRow - 1, 1).setFormulas(formulas);
   }
@@ -198,11 +222,15 @@ function getHistorialPedidosSheet() {
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(4, 150);
     sheet.setColumnWidth(5, 260);
+  } else if ((sheet.getRange(1, 7).getValue() || "").toString() !== "Cantidad") {
+    // La hoja ya existía sin la columna "Cantidad": la agrego una sola vez.
+    sheet.getRange(1, 7).setValue("Cantidad")
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
   }
   return sheet;
 }
 
-function logPedido(empleado, servicio, producto, accion) {
+function logPedido(empleado, servicio, producto, accion, cantidad) {
   const sheet = getHistorialPedidosSheet();
   const tz    = Session.getScriptTimeZone();
   const now   = new Date();
@@ -213,6 +241,35 @@ function logPedido(empleado, servicio, producto, accion) {
   sheet.getRange(lastRow, 4).setValue(servicio);
   sheet.getRange(lastRow, 5).setValue(producto);
   sheet.getRange(lastRow, 6).setValue(accion);
+  sheet.getRange(lastRow, 7).setNumberFormat("@").setValue(cantidad != null ? String(cantidad) : "");
+}
+
+// Parsea el texto de una celda de la grilla de materiales.
+// Formatos: "" (disponible) · "PEDIDO <cant> <fecha>" · "COMPRADO <cant> <fecha>".
+// Tolera el formato viejo sin cantidad ("PEDIDO <fecha>") -> cantidad 1.
+function parseEstadoCelda(texto) {
+  texto = (texto || "").toString().trim();
+  if (texto === "") return { estado: "disponible", cantidad: "", fecha: "" };
+  let m = texto.match(/^(PEDIDO|COMPRADO)\s+(\d+)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/);
+  if (m) {
+    return { estado: m[1] === "PEDIDO" ? "pedido" : "comprado", cantidad: m[2], fecha: m[3] };
+  }
+  m = texto.match(/^(PEDIDO|COMPRADO)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/); // formato viejo sin cantidad
+  if (m) {
+    return { estado: m[1] === "PEDIDO" ? "pedido" : "comprado", cantidad: "1", fecha: m[2] };
+  }
+  // Cualquier otra cosa que empiece con PEDIDO/COMPRADO: tratar como activo.
+  if (texto.indexOf("PEDIDO") === 0)   return { estado: "pedido",   cantidad: "1", fecha: "" };
+  if (texto.indexOf("COMPRADO") === 0) return { estado: "comprado", cantidad: "1", fecha: "" };
+  return { estado: "disponible", cantidad: "", fecha: "" };
+}
+
+// Normaliza la cantidad recibida del cliente a un entero 1..99.
+function normalizarCantidad(raw) {
+  let n = parseInt(raw, 10);
+  if (isNaN(n) || n < 1) n = 1;
+  if (n > 99) n = 99;
+  return n;
 }
 
 function doGet(e) {
@@ -363,8 +420,8 @@ function doGet(e) {
       const productos = PRODUCTOS.map(nombre => {
         const r     = filaPorProducto[nombre];
         const texto = (r ? (r[col - 1] || "") : "").toString();
-        const pedido = texto.indexOf("PEDIDO") === 0;
-        return { nombre, estado: pedido ? "pedido" : "disponible", fecha: pedido ? texto.replace("PEDIDO ", "") : "" };
+        const est   = parseEstadoCelda(texto);
+        return { nombre, estado: est.estado, cantidad: est.cantidad, fecha: est.fecha };
       });
       return jsonOut({ status: "ok", productos });
     } catch (err) {
@@ -385,22 +442,52 @@ function doGet(e) {
       const row   = getProductoRow(sheet, p.producto);
       const col   = getServicioCol(sheet, p.servicio);
       const cell  = sheet.getRange(row, col);
-      const actual = (cell.getValue() || "").toString();
+      const est   = parseEstadoCelda(cell.getValue());
 
-      if (actual.indexOf("PEDIDO") === 0) {
+      if (est.estado !== "disponible") {
         return jsonOut({ status: "error", message: "Ese producto ya está pedido para este servicio" });
       }
 
+      const cantidad = normalizarCantidad(p.cantidad);
       const fecha = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy");
-      cell.setNumberFormat("@").setValue("PEDIDO " + fecha);
-      logPedido(p.empleado, p.servicio, p.producto, "Pedido");
+      cell.setNumberFormat("@").setValue("PEDIDO " + cantidad + " " + fecha);
+      logPedido(p.empleado, p.servicio, p.producto, "Pedido", cantidad);
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
   }
 
-  // ---- RECIBIDO: libera un producto bloqueado para volver a pedirlo ----
+  // ---- COMPRAR: el admin pasa un pedido de PEDIDO a COMPRADO ----
+  if (p.action === "comprar" && p.servicio && p.producto) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (PRODUCTOS.indexOf(p.producto) === -1) {
+      return jsonOut({ status: "error", message: "Producto inválido" });
+    }
+    try {
+      const sheet = getMaterialesSheet();
+      const row   = getProductoRow(sheet, p.producto);
+      const col   = getServicioCol(sheet, p.servicio);
+      const cell  = sheet.getRange(row, col);
+      const est   = parseEstadoCelda(cell.getValue());
+
+      if (est.estado !== "pedido") {
+        return jsonOut({ status: "error", message: "Ese producto no está pendiente de compra" });
+      }
+
+      // Mantiene la cantidad y la fecha original del pedido; solo cambia el estado.
+      cell.setNumberFormat("@").setValue("COMPRADO " + est.cantidad + " " + est.fecha);
+      logPedido(p.admin, p.servicio, p.producto, "Comprado", est.cantidad);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- RECIBIDO: el empleado confirma la recepción y libera el producto ----
+  // Sale desde PEDIDO o COMPRADO (por si el admin no llegó a marcar comprado).
   if (p.action === "recibido" && p.servicio && p.producto) {
     if (!checkAuth(p.empleado, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
@@ -413,15 +500,56 @@ function doGet(e) {
       const row   = getProductoRow(sheet, p.producto);
       const col   = getServicioCol(sheet, p.servicio);
       const cell  = sheet.getRange(row, col);
-      const actual = (cell.getValue() || "").toString();
+      const est   = parseEstadoCelda(cell.getValue());
 
-      if (actual.indexOf("PEDIDO") !== 0) {
+      if (est.estado === "disponible") {
         return jsonOut({ status: "error", message: "No hay un pedido pendiente para este producto" });
       }
 
       cell.setValue("");
-      logPedido(p.empleado, p.servicio, p.producto, "Recibido");
+      logPedido(p.empleado, p.servicio, p.producto, "Recibido", est.cantidad);
       return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- PEDIDOS ACTIVOS: los que están en PEDIDO o COMPRADO ahora mismo ----
+  // Lee la grilla (estado actual, no el log) y devuelve cada celda activa
+  // con su servicio, producto, cantidad, fecha y estado. El admin arma la
+  // lista "para comprar" y marca cada uno como comprado. Solo admins.
+  if (p.action === "adminPedidosActivos") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet   = getMaterialesSheet();
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+      const records = [];
+      if (lastRow > 1 && lastCol > 1) {
+        const grid       = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+        const encabezado = grid[0]; // fila 1: [Producto, Total, servicio1, servicio2, ...]
+        // Las columnas de servicio son todas menos "Producto" (A) y "Total" (B).
+        for (let c = 1; c < lastCol; c++) {
+          const servicio = (encabezado[c] || "").toString();
+          if (servicio === "" || servicio === "Total" || servicio === "Producto") continue;
+          for (let r = 1; r < lastRow; r++) {
+            const producto = (grid[r][0] || "").toString();
+            if (producto === "") continue;
+            const est = parseEstadoCelda(grid[r][c]);
+            if (est.estado === "pedido" || est.estado === "comprado") {
+              records.push({
+                servicio, producto,
+                estado:   est.estado,
+                cantidad: est.cantidad,
+                fecha:    est.fecha
+              });
+            }
+          }
+        }
+      }
+      return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -446,7 +574,8 @@ function doGet(e) {
         empleado: row[2],
         servicio: row[3],
         producto: row[4],
-        accion:   row[5]
+        accion:   row[5],
+        cantidad: row[6] != null ? row[6].toString() : ""
       }));
       return jsonOut({ status: "ok", records });
     } catch (err) {
@@ -474,7 +603,8 @@ function doGet(e) {
           hora:     fmtCell(row[1]),
           empleado: row[2],
           producto: row[4],
-          accion:   row[5]
+          accion:   row[5],
+          cantidad: row[6] != null ? row[6].toString() : ""
         }));
       return jsonOut({ status: "ok", records });
     } catch (err) {
