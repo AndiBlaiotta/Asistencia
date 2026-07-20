@@ -486,9 +486,17 @@ const TOLERANCIA_ANTES_MIN   = 30;
 const TOLERANCIA_DESPUES_MIN = 60;
 const DIAS_NOMBRE = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
 
+// Hora -> minutos desde la medianoche. Soporta 24h ("13:30:00") y 12h con
+// "a. m."/"p. m." (así la manda es-AR toLocaleTimeString en muchos equipos:
+// "01:30:00 p. m." = 13:30). Mismo criterio que horaKey() en el frontend.
 function horaAMin(hora) {
-  const m = (hora || "").toString().match(/^(\d{1,2}):(\d{2})/);
-  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+  hora = (hora || "").toString().toLowerCase();
+  const m = /(\d{1,2}):(\d{2})/.exec(hora);
+  if (!m) return NaN;
+  let hh = Number(m[1]);
+  if (/p\.?\s*m/.test(hora) && hh < 12)  hh += 12;
+  if (/a\.?\s*m/.test(hora) && hh === 12) hh = 0;
+  return hh * 60 + Number(m[2]);
 }
 
 // Día de la semana (0=Dom … 6=Sáb) a partir de "d/M/yyyy" (formato es-AR).
