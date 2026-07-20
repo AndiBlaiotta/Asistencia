@@ -75,7 +75,7 @@ const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto
 
 const EMPLEADOS = [
   "Maria Decimas", "Celeste Freire", "Rocio Medina", "Brisa Medina",
-  "Sabrina Scarampo", "Rebeca Ayala", "Alejandro Jelvez"
+  "Sabrina Scarampo", "Rebeca Ayala", "Alejandro Jelvez", "Milagros Acuña"
 ];
 const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 
@@ -99,7 +99,10 @@ const LEGACY_HASH = {
   "Rebeca Ayala":      "49442a8bccaa5b9c6ce95da7c7c16362c2cba5a7154ade43569894f8eaad3f69",
   "Alejandro Jelvez":  "9224bad05c7df15aa6deba13ff6e66172d0834604362ca34872d8e0d29d1768f",
   "Andrés Blaiotta":   "6487cd4b9c7bef8e1b25608d4b833726299c8e4fb59713ee9d21ead1e1958865",
-  "Martín Fiorentino": "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36"
+  "Martín Fiorentino": "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36",
+  // Milagros Acuña: contraseña inicial "milagros123" (la cambia sí o sí en su
+  // primer login, porque setupAuth la siembra con "cambio obligatorio").
+  "Milagros Acuña":    "092af857f5f8db337c4b44375ea6672c1e80399fe86dda8708d5f58d16ce03f3"
 };
 
 function jsonOut(obj) {
@@ -478,6 +481,9 @@ const HORARIOS = {
     "Del Himno":    { 2: ["09:00", "12:00"], 5: ["09:00", "12:00"] },
     "Garcia Silva": { 1: ["12:30", "15:30"], 4: ["12:30", "15:30"] },
     "San Martín":   { 1: ["16:00", "18:00"], 3: ["16:00", "18:00"], 5: ["16:00", "18:00"] }
+  },
+  "Milagros Acuña": {
+    "Jonte": { 2: ["08:00", "12:00"], 4: ["08:00", "12:00"], 6: ["08:00", "12:00"] }
   }
 };
 

@@ -329,6 +329,7 @@
     <option value="Sabrina Scarampo">Sabrina Scarampo</option>
     <option value="Rebeca Ayala">Rebeca Ayala</option>
     <option value="Alejandro Jelvez">Alejandro Jelvez</option>
+    <option value="Milagros Acuña">Milagros Acuña</option>
     <optgroup label="Administración">
       <option value="Andrés Blaiotta">Andrés Blaiotta</option>
       <option value="Martín Fiorentino">Martín Fiorentino</option>
@@ -606,6 +607,10 @@
         horario: { texto: "Lun/Jue · 12:30–15:30", starts: { 1: "12:30", 4: "12:30" } } },
       { nombre: "San Martín",   dir: "San Martín 88, Morón, Buenos Aires",
         horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } }
+    ],
+    "Milagros Acuña": [
+      { nombre: "Jonte", dir: "Jonte 330, Ramos Mejía, Buenos Aires",
+        horario: { texto: "Mar/Jue/Sáb · 8–12", starts: { 2: "08:00", 4: "08:00", 6: "08:00" } } }
     ]
   };
 
@@ -613,13 +618,9 @@
   // pueden fichar), pero se muestran en el panel de administradores con
   // toda la info disponible y un cartel "Sin asignar".
   //  - Avellaneda: servicio futuro, todavía sin días ni horario.
-  //  - Jonte: ya tiene días/horario, pero falta asignarle un empleado.
   const PENDIENTES = [
     { nombre: "Avellaneda", dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires",
-      nota: "Servicio futuro · todavía sin días ni horario definidos" },
-    { nombre: "Jonte", dir: "Jonte 330, Ramos Mejía, Buenos Aires",
-      horario: { texto: "Mar/Jue/Sáb · 8–12" },
-      nota: "Con días y horario, falta asignarle un empleado" }
+      nota: "Servicio futuro · todavía sin días ni horario definidos" }
   ];
 
   // "Horas Extras" es un servicio extra que tienen TODOS los empleados,
