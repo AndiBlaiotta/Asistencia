@@ -514,8 +514,14 @@ function diaDeSemana(fecha) {
 
 // Valida que la fichada caiga en un día/horario que le corresponde al empleado
 // para ese servicio. Usa fecha/hora reportadas por el cliente (consistente con
-// el cálculo de tardanza, que también es client-side). Devuelve { ok, message }.
-function validarHorarioFichada(empleado, servicio, fecha, hora) {
+// el cálculo de tardanza, que también es client-side).
+// Para la SALIDA, el límite superior se calcula desde la ENTRADA real
+// (`entradaMin`, minutos desde medianoche): si el empleado entró tarde, tiene
+// derecho a cumplir el tiempo de permanencia del servicio y marcar la salida
+// más tarde (entrada + duración + tolerancia), sin quedar trabado. No hay
+// límite inferior para la salida: siempre se puede cerrar una entrada abierta.
+// Devuelve { ok, message }.
+function validarHorarioFichada(empleado, servicio, fecha, hora, tipo, entradaMin) {
   const servHor = (HORARIOS[empleado] || {})[servicio];
   if (!servHor) return { ok: true }; // sin horario definido (ej. Horas Extras) = libre
   const dow = diaDeSemana(fecha);
@@ -527,21 +533,38 @@ function validarHorarioFichada(empleado, servicio, fecha, hora) {
   if (isNaN(min)) return { ok: true }; // sin hora válida: no bloqueo por horario
   const ini = horaAMin(rango[0]);
   const fin = horaAMin(rango[1]);
+
+  if (tipo === "Salida") {
+    const duracion = fin - ini;
+    // Fin programado o (entrada real + duración), lo que sea más tarde.
+    let limite = fin;
+    if (entradaMin != null && !isNaN(entradaMin)) {
+      limite = Math.max(fin, entradaMin + duracion);
+    }
+    if (min > limite + TOLERANCIA_DESPUES_MIN) {
+      return { ok: false, message: `Fuera del horario de salida de "${servicio}".` };
+    }
+    return { ok: true };
+  }
+
+  // Entrada: dentro de la ventana del turno con tolerancia.
   if (min < ini - TOLERANCIA_ANTES_MIN || min > fin + TOLERANCIA_DESPUES_MIN) {
     return { ok: false, message: `Fuera del horario de "${servicio}" (${rango[0]}–${rango[1]}).` };
   }
   return { ok: true };
 }
 
-// Último tipo de fichada ("Entrada"/"Salida"/null) para un servicio en la hoja
-// del empleado. Sirve para no permitir dos entradas seguidas ni una salida sin
-// entrada previa.
-function ultimoTipoServicio(sheet, servicio) {
+// Última fichada de un servicio en la hoja del empleado: { fecha, tipo, hora }
+// o null. Sirve para la secuencia entrada/salida y para calcular la ventana de
+// salida en base a la hora de entrada real.
+function ultimaFichadaServicio(sheet, servicio) {
   const last = sheet.getLastRow();
   if (last <= 1) return null;
-  const vals = sheet.getRange(2, 2, last - 1, 3).getValues(); // cols 2(Servicio) 3(Dir) 4(Tipo)
+  const vals = sheet.getRange(2, 1, last - 1, 5).getValues(); // Fecha,Servicio,Dir,Tipo,Hora
   for (let i = vals.length - 1; i >= 0; i--) {
-    if ((vals[i][0] || "").toString() === servicio) return (vals[i][2] || "").toString();
+    if ((vals[i][1] || "").toString() === servicio) {
+      return { fecha: vals[i][0], tipo: (vals[i][3] || "").toString(), hora: (vals[i][4] || "").toString() };
+    }
   }
   return null;
 }
@@ -987,21 +1010,26 @@ function doGet(e) {
       let sheet = ss.getSheetByName(empleado);
 
       // ---- Validaciones de la fichada (antes de escribir nada) ----
-      // Regla C: día/horario que le corresponde al empleado en ese servicio.
-      const vHor = validarHorarioFichada(empleado, servicio, fecha, hora);
-      if (!vHor.ok) {
-        return jsonOut({ status: "error", message: vHor.message });
-      }
-      // Reglas A/B: no dos entradas seguidas ni una salida sin entrada previa
-      // (mirando la última fichada de ESE servicio en la hoja del empleado).
-      const ultimo = sheet ? ultimoTipoServicio(sheet, servicio) : null;
-      if (tipo === "Entrada" && ultimo === "Entrada") {
+      const ultima     = sheet ? ultimaFichadaServicio(sheet, servicio) : null;
+      const ultimoTipo = ultima ? ultima.tipo : null;
+
+      // Reglas A/B: no dos entradas seguidas ni una salida sin entrada previa.
+      if (tipo === "Entrada" && ultimoTipo === "Entrada") {
         return jsonOut({ status: "error",
           message: `Ya marcaste una entrada en "${servicio}" sin salida. Marcá la salida primero.` });
       }
-      if (tipo === "Salida" && ultimo !== "Entrada") {
+      if (tipo === "Salida" && ultimoTipo !== "Entrada") {
         return jsonOut({ status: "error",
           message: `No hay una entrada abierta en "${servicio}". Marcá la entrada primero.` });
+      }
+
+      // Regla C: día/horario. En la salida, la ventana se calcula desde la hora
+      // de la entrada abierta (permite salir más tarde si entró tarde).
+      const entradaMin = (tipo === "Salida" && ultima && ultima.tipo === "Entrada")
+        ? horaAMin(ultima.hora) : null;
+      const vHor = validarHorarioFichada(empleado, servicio, fecha, hora, tipo, entradaMin);
+      if (!vHor.ok) {
+        return jsonOut({ status: "error", message: vHor.message });
       }
 
       if (!sheet) {
