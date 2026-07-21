@@ -634,10 +634,13 @@ function doGet(e) {
         return jsonOut({ status: "ok", records: [] });
       }
       const data = sheet.getDataRange().getValues();
-      const records = data.slice(1).reverse().map(row => {
+      // `fila` = nº de fila real en la hoja (para poder anular). El elemento i
+      // de data.slice(1) es la fila i+2. Se mapea antes de invertir el orden.
+      const records = data.slice(1).map((row, i) => {
         const lat = row[5], lon = row[6];
         const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
         return {
+          fila:      i + 2,
           fecha:     fmtCell(row[0]),
           servicio:  row[1],
           direccion: row[2],
@@ -648,8 +651,41 @@ function doGet(e) {
           linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
           estado:    row[9] || ""
         };
-      });
+      }).reverse();
       return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ANULAR una fichada: el admin borra una entrada/salida de un empleado.
+  // Verifica fecha/hora/tipo de la fila antes de borrar, para no eliminar otra
+  // si la vista del admin quedó desactualizada. Solo admins.
+  if (p.action === "anularFichada" && p.empleado && p.fila) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (HOJAS_NO_EMPLEADO.indexOf(p.empleado) !== -1) {
+      return jsonOut({ status: "error", message: "Hoja inválida" });
+    }
+    try {
+      const ss    = SpreadsheetApp.getActiveSpreadsheet();
+      const sheet = ss.getSheetByName(p.empleado);
+      if (!sheet) {
+        return jsonOut({ status: "error", message: "El empleado no tiene registros" });
+      }
+      const fila = parseInt(p.fila, 10);
+      if (isNaN(fila) || fila < 2 || fila > sheet.getLastRow()) {
+        return jsonOut({ status: "error", message: "Fila inválida. Recargá y probá de nuevo." });
+      }
+      const row = sheet.getRange(fila, 1, 1, HEADERS.length).getValues()[0];
+      if (fmtCell(row[0]) !== (p.fecha || "") ||
+          fmtCell(row[4]) !== (p.hora  || "") ||
+          (row[3] || "").toString() !== (p.tipo || "")) {
+        return jsonOut({ status: "error", message: "La fichada cambió. Recargá y probá de nuevo." });
+      }
+      sheet.deleteRow(fila);
+      return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
