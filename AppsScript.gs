@@ -490,6 +490,9 @@ const HORARIOS = {
 // Margen para fichar antes del inicio / después del fin del turno.
 const TOLERANCIA_ANTES_MIN   = 30;
 const TOLERANCIA_DESPUES_MIN = 60;
+// Cuánto más tarde del INICIO se puede fichar la entrada (llegada tarde máxima).
+// Más tarde que esto ya no se puede fichar entrada.
+const TOLERANCIA_ENTRADA_TARDE_MIN = 60;
 const DIAS_NOMBRE = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
 
 // Hora -> minutos desde la medianoche. Soporta 24h ("13:30:00") y 12h con
@@ -547,9 +550,13 @@ function validarHorarioFichada(empleado, servicio, fecha, hora, tipo, entradaMin
     return { ok: true };
   }
 
-  // Entrada: dentro de la ventana del turno con tolerancia.
-  if (min < ini - TOLERANCIA_ANTES_MIN || min > fin + TOLERANCIA_DESPUES_MIN) {
-    return { ok: false, message: `Fuera del horario de "${servicio}" (${rango[0]}–${rango[1]}).` };
+  // Entrada: desde 30 min antes del inicio hasta 1h tarde como máximo. No se
+  // puede fichar entrada mucho después del inicio (ni con el turno terminado).
+  if (min < ini - TOLERANCIA_ANTES_MIN) {
+    return { ok: false, message: `Todavía no es hora de fichar entrada en "${servicio}" (arranca ${rango[0]}).` };
+  }
+  if (min > ini + TOLERANCIA_ENTRADA_TARDE_MIN) {
+    return { ok: false, message: `Ya pasó la hora para fichar entrada en "${servicio}" (arranca ${rango[0]}, hasta 1h tarde).` };
   }
   return { ok: true };
 }
