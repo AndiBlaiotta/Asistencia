@@ -576,6 +576,23 @@ function ultimaFichadaServicio(sheet, servicio) {
   return null;
 }
 
+// ¿Ya hay una "Entrada" de ese servicio en esa fecha? Se usa para permitir una
+// sola fichada por servicio por día (si el admin anula la entrada, la fila
+// desaparece y se puede volver a fichar).
+function yaHayEntradaHoy(sheet, servicio, fecha) {
+  const last = sheet.getLastRow();
+  if (last <= 1) return false;
+  const vals = sheet.getRange(2, 1, last - 1, 4).getValues(); // Fecha,Servicio,Dir,Tipo
+  for (let i = 0; i < vals.length; i++) {
+    if ((vals[i][1] || "").toString() === servicio &&
+        (vals[i][3] || "").toString() === "Entrada" &&
+        fmtCell(vals[i][0]) === fecha) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function doGet(e) {
   const p = e.parameter || {};
 
@@ -1064,6 +1081,12 @@ function doGet(e) {
       if (tipo === "Salida" && ultimoTipo !== "Entrada") {
         return jsonOut({ status: "error",
           message: `No hay una entrada abierta en "${servicio}". Marcá la entrada primero.` });
+      }
+
+      // Regla D: una sola fichada (entrada) por servicio por día.
+      if (tipo === "Entrada" && sheet && yaHayEntradaHoy(sheet, servicio, fecha)) {
+        return jsonOut({ status: "error",
+          message: `Ya fichaste "${servicio}" hoy. Solo se puede una vez por día.` });
       }
 
       // Regla C: día/horario. En la salida, la ventana se calcula desde la hora
