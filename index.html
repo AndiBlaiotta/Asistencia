@@ -82,6 +82,18 @@
     }
     input:focus, select:focus { border-color: var(--cyan); background: white; }
 
+    /* Campo de contraseña con ojito para mostrar/ocultar */
+    .pass-wrap { position: relative; }
+    .pass-wrap input { padding-right: 46px; }
+    .pass-toggle {
+      position: absolute; right: 4px; top: 0; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      width: 40px; padding: 0;
+      background: none; border: none; cursor: pointer;
+      font-size: 18px; line-height: 1; opacity: 0.55;
+    }
+    .pass-toggle:hover { opacity: 1; }
+
     .btn {
       width: 100%;
       padding: 14px;
@@ -338,7 +350,10 @@
   </select>
 
   <label for="inp-pass">Contraseña</label>
-  <input type="password" id="inp-pass" placeholder="••••••">
+  <div class="pass-wrap">
+    <input type="password" id="inp-pass" placeholder="••••••">
+    <button type="button" class="pass-toggle" onclick="togglePass('inp-pass', this)" aria-label="Mostrar u ocultar contraseña">👁</button>
+  </div>
 
   <button class="btn btn-primary" onclick="login()">Ingresar</button>
   <div id="login-error" class="error"></div>
@@ -354,9 +369,15 @@
   <div id="pw-usuario" style="text-align:center;font-weight:700;margin-bottom:14px;"></div>
 
   <label for="inp-pw-nueva">Nueva contraseña</label>
-  <input type="password" id="inp-pw-nueva" placeholder="mínimo 6 caracteres">
+  <div class="pass-wrap">
+    <input type="password" id="inp-pw-nueva" placeholder="mínimo 6 caracteres">
+    <button type="button" class="pass-toggle" onclick="togglePass('inp-pw-nueva', this)" aria-label="Mostrar u ocultar contraseña">👁</button>
+  </div>
   <label for="inp-pw-conf">Repetir contraseña</label>
-  <input type="password" id="inp-pw-conf" placeholder="repetí la contraseña">
+  <div class="pass-wrap">
+    <input type="password" id="inp-pw-conf" placeholder="repetí la contraseña">
+    <button type="button" class="pass-toggle" onclick="togglePass('inp-pw-conf', this)" aria-label="Mostrar u ocultar contraseña">👁</button>
+  </div>
 
   <button class="btn btn-primary" onclick="cambiarPassword()">Guardar y entrar</button>
   <button class="btn btn-cambiar" id="pw-cancelar" onclick="cancelarCambioPassword()" style="margin-top:8px;">Cancelar</button>
@@ -680,6 +701,26 @@
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
   }
 
+  // Muestra/oculta el texto de un campo de contraseña (ojito).
+  function togglePass(id, btn) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const oculto = input.type === "password";
+    input.type = oculto ? "text" : "password";
+    btn.textContent = oculto ? "🙈" : "👁";
+    btn.setAttribute("aria-label", oculto ? "Ocultar contraseña" : "Mostrar contraseña");
+  }
+
+  // Vuelve a ocultar todos los campos de contraseña dentro de una pantalla.
+  function ocultarPassCampos(containerId) {
+    document.querySelectorAll(`#${containerId} .pass-wrap`).forEach(w => {
+      const inp = w.querySelector("input");
+      const btn = w.querySelector(".pass-toggle");
+      if (inp) inp.type = "password";
+      if (btn) { btn.textContent = "👁"; btn.setAttribute("aria-label", "Mostrar contraseña"); }
+    });
+  }
+
   // ---------- SESIÓN PERSISTENTE ----------
   // La sesión vence todos los días a las 23:59. Devuelve el timestamp de
   // la próxima 23:59 a partir de ahora (si ya pasó hoy, es la de mañana).
@@ -788,6 +829,7 @@
     pwState = opts;
     document.getElementById("inp-pw-nueva").value = "";
     document.getElementById("inp-pw-conf").value  = "";
+    ocultarPassCampos("screen-password");
     document.getElementById("pw-error").textContent  = "";
     document.getElementById("pw-motivo").textContent = opts.motivo || "";
     document.getElementById("pw-usuario").textContent = opts.user;
@@ -867,6 +909,8 @@
     document.getElementById("screen-admin").style.display = "none";
     document.getElementById("screen-login").style.display = "block";
     document.getElementById("inp-nombre").value = "";
+    document.getElementById("inp-pass").value = "";
+    ocultarPassCampos("screen-login");
     document.getElementById("home-msg").textContent = "";
     document.getElementById("hist-content").innerHTML = `<div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div>`;
     document.getElementById("section-servicios").style.display = "block";
