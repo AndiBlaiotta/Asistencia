@@ -1083,8 +1083,11 @@ function doGet(e) {
           message: `No hay una entrada abierta en "${servicio}". Marcá la entrada primero.` });
       }
 
-      // Regla D: una sola fichada (entrada) por servicio por día.
-      if (tipo === "Entrada" && sheet && yaHayEntradaHoy(sheet, servicio, fecha)) {
+      // Regla D: una sola fichada (entrada) por servicio por día. "Horas
+      // Extras" queda EXENTO: un empleado puede hacer varios trabajos extra el
+      // mismo día, cada uno con su entrada/salida.
+      if (tipo === "Entrada" && servicio !== "Horas Extras" &&
+          sheet && yaHayEntradaHoy(sheet, servicio, fecha)) {
         return jsonOut({ status: "error",
           message: `Ya fichaste "${servicio}" hoy. Solo se puede una vez por día.` });
       }
