@@ -488,7 +488,7 @@ const HORARIOS = {
 };
 
 // Margen para fichar antes del inicio / después del fin del turno.
-const TOLERANCIA_ANTES_MIN   = 30;
+const TOLERANCIA_ANTES_MIN   = 60;
 const TOLERANCIA_DESPUES_MIN = 60;
 // Cuánto más tarde del INICIO se puede fichar la entrada (llegada tarde máxima).
 // Más tarde que esto ya no se puede fichar entrada.
