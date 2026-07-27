@@ -477,11 +477,8 @@
     <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:12px;">📅 Ver todos los ingresos por día</button>
     <button class="btn btn-primary" onclick="openAdminTardanzas()" style="margin-bottom:12px;">⏰ Llegadas tarde</button>
     <button class="btn btn-primary" onclick="openAdminComprar()" style="margin-bottom:12px;">🛒 Pedidos para comprar</button>
-    <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:18px;">📦 Historial de pedidos por lugar</button>
-
-    <div class="section-title">Servicios especiales · todos los empleados</div>
-    <button class="btn btn-primary" onclick="openAdminServicioGlobal('Horas Extras')" style="margin-bottom:12px;">🕐 Horas Extras</button>
-    <button class="btn btn-primary" onclick="openAdminServicioGlobal('Suplencias')" style="margin-bottom:18px;">🔄 Suplencias</button>
+    <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:12px;">📦 Historial de pedidos por lugar</button>
+    <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:18px;">📍 Fichadas por servicio</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -522,9 +519,16 @@
     <div id="admin-tardanzas"></div>
   </div>
 
-  <!-- SERVICIO GLOBAL: todas las fichadas de Horas Extras / Suplencias juntas -->
-  <div id="admin-step-servicioglobal" style="display:none;">
+  <!-- LISTA DE SERVICIOS: todos los servicios de la empresa (accesos separados) -->
+  <div id="admin-step-servicioslista" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Todos los servicios · elegí uno para ver sus fichadas</div>
+    <div id="admin-servicios-lista"></div>
+  </div>
+
+  <!-- SERVICIO GLOBAL: todas las fichadas de un servicio, de todos los empleados -->
+  <div id="admin-step-servicioglobal" style="display:none;">
+    <button class="btn btn-cambiar" onclick="openAdminServiciosLista()">↩ Volver a servicios</button>
     <div class="section-title" style="margin-top:16px;" id="admin-sg-title"></div>
     <button class="btn-refresh" onclick="loadAdminServicioGlobal(true)">🔄 Actualizar</button>
     <div id="admin-servicioglobal"></div>
@@ -1395,6 +1399,7 @@
     document.getElementById("admin-step-comprar").style.display    = step === "comprar"   ? "block" : "none";
     document.getElementById("admin-step-tardanzas").style.display  = step === "tardanzas" ? "block" : "none";
     document.getElementById("admin-step-servicioglobal").style.display = step === "servicioglobal" ? "block" : "none";
+    document.getElementById("admin-step-servicioslista").style.display = step === "servicioslista" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -1956,15 +1961,43 @@
     el.innerHTML = resumenHtml + detalleHtml;
   }
 
-  // ---------- SERVICIO GLOBAL (Horas Extras / Suplencias, todos juntos) ----------
-  // Muestra todas las fichadas de un servicio "libre" a través de todos los
-  // empleados, con dirección y empleado. Cache por servicio.
+  // ---------- LISTA DE SERVICIOS (todos, accesos separados) ----------
+  // Todos los servicios de la empresa, sin repetir (varios empleados comparten
+  // servicio), ordenados alfabéticamente, con "Horas Extras" y "Suplencias"
+  // como dos entradas separadas al final.
+  function todosLosServicios() {
+    const vistos = {}, lista = [];
+    Object.keys(SERVICIOS).forEach(emp => (SERVICIOS[emp] || []).forEach(s => {
+      if (!vistos[s.nombre]) { vistos[s.nombre] = true; lista.push(s); }
+    }));
+    lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    return lista.concat([HORAS_EXTRAS, SUPLENCIAS]);
+  }
+
+  function openAdminServiciosLista() {
+    adminShowStep("servicioslista");
+    const servicios = todosLosServicios();
+    document.getElementById("admin-servicios-lista").innerHTML = servicios.map(s => `
+      <button class="service-card" onclick="openAdminServicioGlobal('${encodeURIComponent(s.nombre)}')">
+        <div>
+          <div class="s-nombre">${s.nombre}</div>
+          <div class="s-dir">${s.custom ? "✍️ Dirección variable · todos los empleados" : s.dir}</div>
+          ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
+        </div>
+        <span class="s-arrow">›</span>
+      </button>
+    `).join("");
+  }
+
+  // ---------- SERVICIO GLOBAL (fichadas de un servicio, todos los empleados) ----------
+  // Muestra todas las fichadas de un servicio a través de todos los empleados,
+  // con dirección y empleado. Cache por servicio.
   let adminSGServicio = null;
   const adminSGCache = {};
 
-  function openAdminServicioGlobal(servicio) {
-    adminSGServicio = servicio;
-    document.getElementById("admin-sg-title").textContent = servicio + " · todos los empleados";
+  function openAdminServicioGlobal(servicioEnc) {
+    adminSGServicio = decodeURIComponent(servicioEnc);
+    document.getElementById("admin-sg-title").textContent = adminSGServicio + " · todos los empleados";
     adminShowStep("servicioglobal");
     loadAdminServicioGlobal(false);
   }

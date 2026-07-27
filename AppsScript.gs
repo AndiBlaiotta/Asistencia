@@ -599,6 +599,17 @@ function yaHayEntradaHoy(sheet, servicio, fecha) {
   return false;
 }
 
+// Conjunto de nombres de servicio válidos: los reales (todos figuran en
+// HORARIOS) + los libres (Horas Extras / Suplencias). Sirve para validar el
+// parámetro `servicio` de adminServicioGlobal contra una lista conocida.
+function serviciosConocidos() {
+  const set = {};
+  Object.keys(HORARIOS).forEach(emp =>
+    Object.keys(HORARIOS[emp]).forEach(s => { set[s] = true; }));
+  SERVICIOS_LIBRES.forEach(s => { set[s] = true; });
+  return set;
+}
+
 function doGet(e) {
   const p = e.parameter || {};
 
@@ -689,7 +700,7 @@ function doGet(e) {
     if (!checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (SERVICIOS_LIBRES.indexOf(p.servicio) === -1) {
+    if (!serviciosConocidos()[p.servicio]) {
       return jsonOut({ status: "error", message: "Servicio inválido" });
     }
     try {
