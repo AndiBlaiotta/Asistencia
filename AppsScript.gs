@@ -79,6 +79,12 @@ const EMPLEADOS = [
 ];
 const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 
+// Servicios "libres": sin horario fijo, con dirección variable escrita al
+// fichar, EXENTOS de la regla de una fichada por día (Regla D) y disponibles
+// para TODOS los empleados por encima de sus servicios. Duplicado a propósito
+// en index.html (front, como HORAS_EXTRAS/SUPLENCIAS). Cambiar = tocar ambos.
+const SERVICIOS_LIBRES = ["Horas Extras", "Suplencias"];
+
 // La contraseña caduca a los 90 días: en el próximo login el sistema obliga
 // a elegir una nueva.
 const PASSWORD_MAX_AGE_DAYS = 90;
@@ -675,6 +681,48 @@ function doGet(e) {
     }
   }
 
+  // ---- SERVICIO GLOBAL: todas las fichadas de un servicio "libre" (Horas
+  // Extras / Suplencias) juntas, de TODOS los empleados, con dirección y
+  // empleado. A diferencia de adminHistorial (una hoja), recorre todas las
+  // hojas de empleados y filtra por servicio. Solo admins.
+  if (p.action === "adminServicioGlobal" && p.servicio) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (SERVICIOS_LIBRES.indexOf(p.servicio) === -1) {
+      return jsonOut({ status: "error", message: "Servicio inválido" });
+    }
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const records = [];
+      ss.getSheets().forEach(sheet => {
+        const empleado = sheet.getName();
+        if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
+        const lastRow = sheet.getLastRow();
+        if (lastRow <= 1) return;
+        const data = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+        data.forEach((row, i) => {
+          if ((row[1] || "").toString() !== p.servicio) return;
+          const lat = row[5], lon = row[6];
+          const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+          records.push({
+            fila:      i + 2,
+            empleado:  empleado,
+            fecha:     fmtCell(row[0]),
+            direccion: row[2],
+            tipo:      row[3],
+            hora:      fmtCell(row[4]),
+            linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
+            estado:    row[9] || ""
+          });
+        });
+      });
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- ANULAR una fichada: el admin borra una entrada/salida de un empleado.
   // Verifica fecha/hora/tipo de la fila antes de borrar, para no eliminar otra
   // si la vista del admin quedó desactualizada. Solo admins.
@@ -1083,10 +1131,10 @@ function doGet(e) {
           message: `No hay una entrada abierta en "${servicio}". Marcá la entrada primero.` });
       }
 
-      // Regla D: una sola fichada (entrada) por servicio por día. "Horas
-      // Extras" queda EXENTO: un empleado puede hacer varios trabajos extra el
-      // mismo día, cada uno con su entrada/salida.
-      if (tipo === "Entrada" && servicio !== "Horas Extras" &&
+      // Regla D: una sola fichada (entrada) por servicio por día. Los servicios
+      // "libres" ("Horas Extras" y "Suplencias") quedan EXENTOS: un empleado
+      // puede fichar varios de esos el mismo día, cada uno con su entrada/salida.
+      if (tipo === "Entrada" && SERVICIOS_LIBRES.indexOf(servicio) === -1 &&
           sheet && yaHayEntradaHoy(sheet, servicio, fecha)) {
         return jsonOut({ status: "error",
           message: `Ya fichaste "${servicio}" hoy. Solo se puede una vez por día.` });
