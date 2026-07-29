@@ -2183,13 +2183,21 @@
   // Muestra todas las fichadas de un servicio a través de todos los empleados,
   // con dirección y empleado. Cache por servicio.
   let adminSGServicio = null;
+  let adminSGEmpFiltro = ""; // "" = todos los empleados
   const adminSGCache = {};
 
   function openAdminServicioGlobal(servicioEnc) {
     adminSGServicio = decodeURIComponent(servicioEnc);
+    adminSGEmpFiltro = "";
     document.getElementById("admin-sg-title").textContent = adminSGServicio + " · todos los empleados";
     adminShowStep("servicioglobal");
     loadAdminServicioGlobal(false);
+  }
+
+  // Cambio del selector de empleado: re-renderiza filtrando por ese empleado.
+  function onSGFiltro() {
+    adminSGEmpFiltro = document.getElementById("sg-emp-filtro").value;
+    renderAdminServicioGlobal(adminSGCache[adminSGServicio] || []);
   }
 
   async function loadAdminServicioGlobal(forzar) {
@@ -2221,11 +2229,24 @@
       el.innerHTML = `<div class="hist-empty">No hay fichadas registradas.</div>`;
       return;
     }
+
+    // Selector de empleado: filtra las fichadas que se muestran abajo.
+    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
+    if (adminSGEmpFiltro && empleados.indexOf(adminSGEmpFiltro) === -1) adminSGEmpFiltro = "";
+    const selectorHtml = `
+      <label for="sg-emp-filtro" style="margin-top:0;">Filtrar por empleado</label>
+      <select id="sg-emp-filtro" onchange="onSGFiltro()">
+        <option value="">Todos los empleados</option>
+        ${empleados.map(e => `<option value="${e}"${e === adminSGEmpFiltro ? " selected" : ""}>${e}</option>`).join("")}
+      </select>`;
+
+    const rec = adminSGEmpFiltro ? records.filter(r => r.empleado === adminSGEmpFiltro) : records;
+
     const grupos = {};
-    records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+    rec.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
 
     const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
-    el.innerHTML = fechas.map(fecha => {
+    el.innerHTML = selectorHtml + fechas.map(fecha => {
       const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
       return `
       <div class="hist-day">
