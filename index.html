@@ -2052,6 +2052,21 @@
     return `${MESES[(+m) - 1] || "?"} ${y}`;
   }
 
+  // Texto del horario de un servicio de un empleado (ej. "Lun a Vie 8–16").
+  // Vacío si el servicio no tiene horario definido (libres) o no se encuentra.
+  function horarioTextoDe(empleado, servicioNombre) {
+    const s = (SERVICIOS[empleado] || []).find(x => x.nombre === servicioNombre);
+    return s && s.horario ? s.horario.texto : "";
+  }
+
+  // Nombre del día de la semana a partir de "d/M/yyyy" (formato es-AR).
+  function diaSemanaNombre(fecha) {
+    const p = (fecha || "").trim().split("/");
+    if (p.length !== 3) return "";
+    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    return dias[new Date(+p[2], +p[1] - 1, +p[0]).getDay()] || "";
+  }
+
   function renderAdminTardanzas(records) {
     const el = document.getElementById("admin-tardanzas");
     if (!records.length) {
@@ -2114,16 +2129,22 @@
         const regs = dias[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
         return `
         <div class="hist-day">
-          <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "tarde" : "tardes"}</div>
-          ${regs.map(r => `
+          <div class="hist-day-label">${diaSemanaNombre(fecha)} ${fecha} · ${regs.length} ${regs.length === 1 ? "tarde" : "tardes"}</div>
+          ${regs.map(r => {
+            const hor = filtrado ? horarioTextoDe(r.empleado, r.servicio) : "";
+            return `
             <div class="hist-row salida">
-              <div><div class="hr-serv">${filtrado ? r.servicio : r.empleado}</div>
-                   <div class="hr-hora">${filtrado ? r.hora : r.servicio + " · " + r.hora}${r.motivo ? " · 📝 " + r.motivo : ""}</div></div>
+              <div>
+                <div class="hr-serv">${filtrado ? r.servicio : r.empleado}</div>
+                <div class="hr-hora">${filtrado ? r.hora : r.servicio + " · " + r.hora}${r.motivo ? " · 📝 " + r.motivo : ""}</div>
+                ${hor ? `<div class="hr-hora" style="color:#4f46e5;font-weight:700;">🕐 ${hor}</div>` : ""}
+              </div>
               <div class="hr-right">
                 <span class="badge badge-tarde">Tarde ${r.minutos} min</span>
                 ${anularBtnHtml(r.empleado, r.servicio, r, "tardanzas")}
               </div>
-            </div>`).join("")}
+            </div>`;
+          }).join("")}
         </div>`;
       }).join("")}`;
 
