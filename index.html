@@ -321,6 +321,42 @@
     #tab-materiales { display: none; }
     #mat-sin-servicio { display: block; }
     #mat-con-servicio { display: none; }
+
+    /* ============================================================
+       ESCRITORIO (pantallas anchas): la app está pensada para el
+       celular (tarjeta angosta). Acá la ensanchamos para que en la PC
+       no se vea como un teléfono en el medio de la pantalla. El login
+       y el cambio de contraseña quedan angostos a propósito (formulario
+       enfocado); las pantallas de trabajo (home/admin) usan el ancho y
+       muestran las listas de tarjetas en 2 columnas.
+       ============================================================ */
+    @media (min-width: 720px) {
+      body { padding: 40px; }
+
+      #screen-home, #screen-admin {
+        max-width: 780px;
+        padding: 34px 40px;
+      }
+
+      /* Listas de tarjetas -> 2 columnas para aprovechar el ancho. */
+      #service-list, #mat-service-list, #admin-emp-list, #admin-serv-list,
+      #admin-servicios-lista, #admin-pendientes {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+      #service-list .service-card, #mat-service-list .service-card,
+      #admin-emp-list .service-card, #admin-serv-list .service-card,
+      #admin-servicios-lista .service-card, #admin-pendientes .service-card {
+        margin-bottom: 0;
+      }
+    }
+
+    /* Pantallas grandes de verdad: un poco más de aire todavía. */
+    @media (min-width: 1100px) {
+      #screen-home, #screen-admin { max-width: 860px; }
+    }
   </style>
 </head>
 <body>
