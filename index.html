@@ -1597,6 +1597,7 @@
               ${r.linkGPS && r.linkGPS !== "No disponible"
                 ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                 : ``}
+              ${anularBtnHtml(r.empleado, r.servicio, r, "resumen")}
             </div>
           </div>
         `).join("")}
@@ -1803,7 +1804,7 @@
               ${r.linkGPS && r.linkGPS !== "No disponible"
                 ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                 : ``}
-              <br><button class="btn-mini btn-anular" onclick="anularFichada(${r.fila}, '${encodeURIComponent(r.fecha)}', '${encodeURIComponent(r.hora)}', '${encodeURIComponent(r.tipo)}')">🗑️ Anular</button>
+              ${anularBtnHtml(adminEmpleado, adminServicio.nombre, r, "fichadas")}
             </div>
           </div>
         `).join("")}
@@ -1811,23 +1812,45 @@
     `).join("");
   }
 
+  // Botón "Anular" reutilizable para cualquier vista de fichadas. `r` debe
+  // traer fila/fecha/hora/tipo; `origen` indica qué vista recargar al terminar.
+  // Si la fichada no tiene nº de fila (backend viejo), no muestra el botón.
+  function anularBtnHtml(empleado, servicio, r, origen) {
+    if (r.fila == null) return "";
+    return `<br><button class="btn-mini btn-anular" onclick="anularFichada(`
+      + `'${encodeURIComponent(empleado)}','${encodeURIComponent(servicio || "")}',`
+      + `${r.fila},'${encodeURIComponent(r.fecha)}','${encodeURIComponent(r.hora)}',`
+      + `'${encodeURIComponent(r.tipo || "")}','${origen}')">🗑️ Anular</button>`;
+  }
+
   // Anula (borra) una fichada de un empleado. Solo admins. Pide confirmación y
   // manda fecha/hora/tipo para que el server verifique que borra la correcta.
-  async function anularFichada(fila, fechaEnc, horaEnc, tipoEnc) {
-    const fecha = decodeURIComponent(fechaEnc);
-    const hora  = decodeURIComponent(horaEnc);
-    const tipo  = decodeURIComponent(tipoEnc);
-    if (!confirm(`¿Anular la ${tipo.toLowerCase()} de ${adminEmpleado} en ${adminServicio.nombre}?\n${fecha} · ${hora}\n\nNo se puede deshacer.`)) return;
+  // Funciona desde cualquier vista: al borrar se corren las filas, así que
+  // invalida TODAS las caches y recarga la vista de origen con datos frescos.
+  async function anularFichada(empEnc, servEnc, fila, fechaEnc, horaEnc, tipoEnc, origen) {
+    const empleado = decodeURIComponent(empEnc);
+    const servicio = decodeURIComponent(servEnc);
+    const fecha    = decodeURIComponent(fechaEnc);
+    const hora     = decodeURIComponent(horaEnc);
+    const tipo     = decodeURIComponent(tipoEnc);
+    if (!confirm(`¿Anular la ${tipo.toLowerCase()} de ${empleado}${servicio ? " en " + servicio : ""}?\n${fecha} · ${hora}\n\nNo se puede deshacer.`)) return;
     try {
       const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
         action: "anularFichada", admin: currentUser, hash: currentHash,
-        empleado: adminEmpleado, fila, fecha, hora, tipo
+        empleado, fila, fecha, hora, tipo
       }).toString();
       const res  = await fetch(url, { redirect: "follow" });
       const json = await res.json();
       if (json.status !== "ok") { alert(json.message || "No se pudo anular."); return; }
-      adminRecordsCache = { empleado: null, records: null }; // invalidar y recargar
-      adminLoadFichadas();
+      // Invalidar todas las caches (los nº de fila cambian al borrar) y recargar.
+      adminRecordsCache   = { empleado: null, records: null };
+      adminResumenCache   = null;
+      adminTardanzasCache = null;
+      for (const k in adminSGCache) delete adminSGCache[k];
+      if      (origen === "resumen")        loadAdminResumen(true);
+      else if (origen === "tardanzas")      loadAdminTardanzas(true);
+      else if (origen === "servicioglobal") loadAdminServicioGlobal(true);
+      else                                  adminLoadFichadas();
     } catch (e) {
       alert("❌ Error: " + e.message);
     }
@@ -2096,7 +2119,10 @@
             <div class="hist-row salida">
               <div><div class="hr-serv">${filtrado ? r.servicio : r.empleado}</div>
                    <div class="hr-hora">${filtrado ? r.hora : r.servicio + " · " + r.hora}${r.motivo ? " · 📝 " + r.motivo : ""}</div></div>
-              <span class="badge badge-tarde">Tarde ${r.minutos} min</span>
+              <div class="hr-right">
+                <span class="badge badge-tarde">Tarde ${r.minutos} min</span>
+                ${anularBtnHtml(r.empleado, r.servicio, r, "tardanzas")}
+              </div>
             </div>`).join("")}
         </div>`;
       }).join("")}`;
@@ -2197,6 +2223,7 @@
               ${r.linkGPS && r.linkGPS !== "No disponible"
                 ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                 : ``}
+              ${anularBtnHtml(r.empleado, adminSGServicio, r, "servicioglobal")}
             </div>
           </div>
         `).join("")}

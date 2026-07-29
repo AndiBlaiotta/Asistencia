@@ -787,10 +787,11 @@ function doGet(e) {
         const numRows  = Math.min(lastRow - 1, RESUMEN_TAIL);
         const startRow = lastRow - numRows + 1;
         const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
-        data.forEach(row => {
+        data.forEach((row, i) => {
           const lat = row[5], lon = row[6];
           const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
           records.push({
+            fila:      startRow + i,   // nº de fila real en la hoja (para anular)
             empleado:  empleado,
             fecha:     fmtCell(row[0]),
             servicio:  row[1],
@@ -828,13 +829,15 @@ function doGet(e) {
         const numRows  = Math.min(lastRow - 1, TARDANZAS_TAIL);
         const startRow = lastRow - numRows + 1;
         const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
-        data.forEach(row => {
+        data.forEach((row, i) => {
           const estado = (row[9] || "").toString();
           const m = estado.match(/Tarde\s+(\d+)/);
           if (!m) return;
           records.push({
+            fila:     startRow + i,    // nº de fila real en la hoja (para anular)
             empleado: empleado,
             servicio: row[1],
+            tipo:     row[3],
             fecha:    fmtCell(row[0]),
             hora:     fmtCell(row[4]),
             minutos:  Number(m[1]),
