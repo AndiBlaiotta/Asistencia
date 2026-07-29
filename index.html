@@ -310,6 +310,28 @@
     .mat-badge { font-size: 11px; font-weight: 700; padding: 5px 9px; border-radius: 8px; white-space: nowrap; flex-shrink: 0; }
     .mat-badge.comprado { background: #dbeafe; color: #2563eb; }
 
+    /* ---- MODAL (motivo de tardanza) ---- */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(10,10,10,0.55);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px; z-index: 100;
+    }
+    .modal-box {
+      background: white; border-radius: 18px;
+      padding: 24px 22px; width: 100%; max-width: 380px;
+      box-shadow: 0 10px 48px rgba(0,0,0,0.28);
+    }
+    .modal-title { font-size: 18px; font-weight: 900; color: #b45309; text-align: center; }
+    .modal-sub   { font-size: 13px; color: var(--gray); text-align: center; margin: 8px 0 4px; font-weight: 600; line-height: 1.4; }
+    .modal-box textarea {
+      width: 100%; margin-top: 10px; padding: 12px 14px;
+      border: 1.5px solid var(--border); border-radius: 12px;
+      font-size: 15px; font-family: 'Montserrat', sans-serif; color: var(--black);
+      background: #FAFCFD; outline: none; resize: vertical;
+    }
+    .modal-box textarea:focus { border-color: var(--cyan); background: white; }
+
     /* ---- SCREENS ---- */
     #screen-login  { display: block; }
     #screen-home   { display: none; }
@@ -612,6 +634,18 @@
 
   <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
   <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
+</div>
+
+<!-- ==================== MODAL: MOTIVO DE TARDANZA ==================== -->
+<div id="modal-motivo" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-title">⚠️ Llegaste tarde</div>
+    <div class="modal-sub" id="modal-motivo-sub"></div>
+    <label for="modal-motivo-text">¿Por qué llegaste tarde?</label>
+    <textarea id="modal-motivo-text" rows="3" placeholder="Escribí el motivo (obligatorio)..." oninput="onMotivoInput()"></textarea>
+    <button class="btn btn-entrada" id="modal-motivo-ok" onclick="confirmarMotivo()" disabled>Registrar entrada</button>
+    <button class="btn btn-cambiar" onclick="cancelarMotivo()">Cancelar</button>
+  </div>
 </div>
 
 <script>
@@ -1086,6 +1120,40 @@
     document.getElementById("home-msg").textContent = "";
   }
 
+  // ---------- MODAL: MOTIVO DE TARDANZA ----------
+  // Devuelve una Promesa que resuelve al motivo (texto no vacío) o a null si
+  // el empleado cancela. Bloquea "Registrar entrada" hasta que escriba algo.
+  let motivoResolver = null;
+  function pedirMotivoTardanza(minTexto) {
+    return new Promise(resolve => {
+      motivoResolver = resolve;
+      const txt = document.getElementById("modal-motivo-text");
+      txt.value = "";
+      document.getElementById("modal-motivo-ok").disabled = true;
+      document.getElementById("modal-motivo-sub").textContent =
+        `Estás fichando la entrada ${minTexto} tarde. Para registrarla, contanos por qué.`;
+      document.getElementById("modal-motivo").style.display = "flex";
+      setTimeout(() => txt.focus(), 50);
+    });
+  }
+  function onMotivoInput() {
+    const v = document.getElementById("modal-motivo-text").value.trim();
+    document.getElementById("modal-motivo-ok").disabled = v.length === 0;
+  }
+  function cerrarModalMotivo() {
+    document.getElementById("modal-motivo").style.display = "none";
+  }
+  function confirmarMotivo() {
+    const v = document.getElementById("modal-motivo-text").value.trim();
+    if (!v) return; // obligatorio: no se puede confirmar vacío
+    cerrarModalMotivo();
+    if (motivoResolver) { motivoResolver(v); motivoResolver = null; }
+  }
+  function cancelarMotivo() {
+    cerrarModalMotivo();
+    if (motivoResolver) { motivoResolver(null); motivoResolver = null; }
+  }
+
   // ---------- REGISTRAR ----------
   async function registrar(tipo) {
     const msgEl = document.getElementById("home-msg");
@@ -1114,14 +1182,27 @@
       return;
     }
 
+    const now = new Date();
+    // La tardanza solo aplica a la Entrada (no a la Salida).
+    const estado = tipo === "Entrada" ? calcularEstado(selectedService, now) : "";
+
+    // Si la entrada quedó marcada "Tarde", el empleado tiene que explicar el
+    // motivo SÍ o SÍ antes de fichar (cartel). Si cancela, no se ficha.
+    let motivo = "";
+    if (estado.startsWith("Tarde")) {
+      motivo = await pedirMotivoTardanza(estado.replace("Tarde ", "").trim());
+      if (motivo === null) {           // canceló el cartel: no fichar
+        msgEl.className = "";
+        msgEl.textContent = "";
+        return;
+      }
+    }
+
     msgEl.className = "success";
     msgEl.style.color = "";
     msgEl.textContent = "Guardando...";
     btnE.disabled = btnS.disabled = true;
 
-    const now = new Date();
-    // La tardanza solo aplica a la Entrada (no a la Salida).
-    const estado = tipo === "Entrada" ? calcularEstado(selectedService, now) : "";
     const record = {
       empleado:  currentUser,
       hash:      currentHash,
@@ -1133,7 +1214,8 @@
       lat:       currentCoords ? currentCoords.lat : "",
       lon:       currentCoords ? currentCoords.lon : "",
       precision: currentCoords ? currentCoords.acc : "",
-      estado:    estado
+      estado:    estado,
+      motivo:    motivo
     };
 
     try {
@@ -1895,12 +1977,20 @@
 
   // ---------- LLEGADAS TARDE ----------
   let adminTardanzasCache = null;
+  let adminTardanzasEmpFiltro = ""; // "" = todos los empleados
   const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
                  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
   function openAdminTardanzas() {
+    adminTardanzasEmpFiltro = "";
     adminShowStep("tardanzas");
     loadAdminTardanzas(false);
+  }
+
+  // Cambio del selector de empleado: re-renderiza filtrando por ese empleado.
+  function onTardanzaFiltro() {
+    adminTardanzasEmpFiltro = document.getElementById("tard-emp-filtro").value;
+    renderAdminTardanzas(adminTardanzasCache || []);
   }
 
   async function loadAdminTardanzas(forzar) {
@@ -1946,9 +2036,25 @@
       return;
     }
 
+    // ---- Selector de empleado: filtra TODO lo de abajo ----
+    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
+    // Si el filtro apuntaba a alguien que ya no tiene tardanzas, volver a "todos".
+    if (adminTardanzasEmpFiltro && empleados.indexOf(adminTardanzasEmpFiltro) === -1) {
+      adminTardanzasEmpFiltro = "";
+    }
+    const selectorHtml = `
+      <label for="tard-emp-filtro" style="margin-top:0;">Filtrar por empleado</label>
+      <select id="tard-emp-filtro" onchange="onTardanzaFiltro()">
+        <option value="">Todos los empleados</option>
+        ${empleados.map(e => `<option value="${e}"${e === adminTardanzasEmpFiltro ? " selected" : ""}>${e}</option>`).join("")}
+      </select>`;
+
+    const filtrado = !!adminTardanzasEmpFiltro;
+    const rec = filtrado ? records.filter(r => r.empleado === adminTardanzasEmpFiltro) : records;
+
     // ---- Resumen mensual: total de tiempo tarde y desglose por empleado ----
     const meses = {};
-    records.forEach(r => {
+    rec.forEach(r => {
       const k = mesKey(r.fecha);
       const mes = meses[k] || (meses[k] = { total: 0, emp: {} });
       mes.total += r.minutos;
@@ -1958,7 +2064,7 @@
     });
     const mesesOrd = Object.keys(meses).sort().reverse();
     const resumenHtml = `
-      <div class="section-title" style="margin-top:4px;">Resumen mensual</div>
+      <div class="section-title" style="margin-top:16px;">Resumen mensual${filtrado ? " · " + adminTardanzasEmpFiltro : ""}</div>
       ${mesesOrd.map(k => {
         const mes = meses[k];
         const emps = Object.keys(mes.emp).sort((a, b) => mes.emp[b].min - mes.emp[a].min);
@@ -1974,9 +2080,10 @@
         </div>`;
       }).join("")}`;
 
-    // ---- Detalle por día ----
+    // ---- Detalle por día. Cuando hay un empleado filtrado, la fila destaca
+    // el servicio (el empleado ya se sabe); con el motivo de la tardanza. ----
     const dias = {};
-    records.forEach(r => { (dias[r.fecha] = dias[r.fecha] || []).push(r); });
+    rec.forEach(r => { (dias[r.fecha] = dias[r.fecha] || []).push(r); });
     const diasOrd = Object.keys(dias).sort((a, b) => fechaKey(b) - fechaKey(a));
     const detalleHtml = `
       <div class="section-title" style="margin-top:20px;">Detalle por día</div>
@@ -1987,14 +2094,14 @@
           <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "tarde" : "tardes"}</div>
           ${regs.map(r => `
             <div class="hist-row salida">
-              <div><div class="hr-serv">${r.empleado}</div>
-                   <div class="hr-hora">${r.servicio} · ${r.hora}</div></div>
+              <div><div class="hr-serv">${filtrado ? r.servicio : r.empleado}</div>
+                   <div class="hr-hora">${filtrado ? r.hora : r.servicio + " · " + r.hora}${r.motivo ? " · 📝 " + r.motivo : ""}</div></div>
               <span class="badge badge-tarde">Tarde ${r.minutos} min</span>
             </div>`).join("")}
         </div>`;
       }).join("")}`;
 
-    el.innerHTML = resumenHtml + detalleHtml;
+    el.innerHTML = selectorHtml + resumenHtml + detalleHtml;
   }
 
   // ---------- LISTA DE SERVICIOS (todos, accesos separados) ----------

@@ -32,7 +32,8 @@ const HEADERS = [
   "Longitud",
   "Link GPS",
   "Precisión (m)",
-  "Estado"
+  "Estado",
+  "Motivo tardanza"
 ];
 
 // Hojas que NO son de empleados (no llevan fichadas): se saltean al recorrer
@@ -493,12 +494,10 @@ const HORARIOS = {
   }
 };
 
-// Margen para fichar antes del inicio / después del fin del turno.
-const TOLERANCIA_ANTES_MIN   = 60;
+// Margen para fichar la SALIDA después del fin de la ventana del turno.
+// (La ENTRADA ya no tiene límite de horario: se puede fichar tarde sin tope,
+// con motivo obligatorio.)
 const TOLERANCIA_DESPUES_MIN = 60;
-// Cuánto más tarde del INICIO se puede fichar la entrada (llegada tarde máxima).
-// Más tarde que esto ya no se puede fichar entrada.
-const TOLERANCIA_ENTRADA_TARDE_MIN = 60;
 const DIAS_NOMBRE = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
 
 // Hora -> minutos desde la medianoche. Soporta 24h ("13:30:00") y 12h con
@@ -538,31 +537,28 @@ function validarHorarioFichada(empleado, servicio, fecha, hora, tipo, entradaMin
   if (!rango) {
     return { ok: false, message: `No tenés turno en "${servicio}" los ${DIAS_NOMBRE[dow] || "ese día"}.` };
   }
+
+  // ENTRADA: sin límite de horario. Se puede fichar entrada a cualquier hora
+  // del día que le corresponde al servicio (si llegó tarde, el cliente le pide
+  // el motivo obligatorio y la fichada queda marcada "Tarde"). Solo se valida
+  // que el servicio funcione ese día.
+  if (tipo !== "Salida") return { ok: true };
+
+  // SALIDA: la ventana contempla la duración del servicio. Se calcula desde la
+  // ENTRADA real: puede salir hasta (entrada + duración del servicio) o el fin
+  // programado, lo que sea más tarde, con tolerancia. Sin límite inferior:
+  // siempre se puede cerrar una entrada abierta.
   const min = horaAMin(hora);
   if (isNaN(min)) return { ok: true }; // sin hora válida: no bloqueo por horario
   const ini = horaAMin(rango[0]);
   const fin = horaAMin(rango[1]);
-
-  if (tipo === "Salida") {
-    const duracion = fin - ini;
-    // Fin programado o (entrada real + duración), lo que sea más tarde.
-    let limite = fin;
-    if (entradaMin != null && !isNaN(entradaMin)) {
-      limite = Math.max(fin, entradaMin + duracion);
-    }
-    if (min > limite + TOLERANCIA_DESPUES_MIN) {
-      return { ok: false, message: `Fuera del horario de salida de "${servicio}".` };
-    }
-    return { ok: true };
+  const duracion = fin - ini;
+  let limite = fin;
+  if (entradaMin != null && !isNaN(entradaMin)) {
+    limite = Math.max(fin, entradaMin + duracion);
   }
-
-  // Entrada: desde 30 min antes del inicio hasta 1h tarde como máximo. No se
-  // puede fichar entrada mucho después del inicio (ni con el turno terminado).
-  if (min < ini - TOLERANCIA_ANTES_MIN) {
-    return { ok: false, message: `Todavía no es hora de fichar entrada en "${servicio}" (arranca ${rango[0]}).` };
-  }
-  if (min > ini + TOLERANCIA_ENTRADA_TARDE_MIN) {
-    return { ok: false, message: `Ya pasó la hora para fichar entrada en "${servicio}" (arranca ${rango[0]}, hasta 1h tarde).` };
+  if (min > limite + TOLERANCIA_DESPUES_MIN) {
+    return { ok: false, message: `Fuera del horario de salida de "${servicio}".` };
   }
   return { ok: true };
 }
@@ -841,7 +837,8 @@ function doGet(e) {
             servicio: row[1],
             fecha:    fmtCell(row[0]),
             hora:     fmtCell(row[4]),
-            minutos:  Number(m[1])
+            minutos:  Number(m[1]),
+            motivo:   (row[10] || "").toString()
           });
         });
       });
@@ -1116,6 +1113,8 @@ function doGet(e) {
       const lat       = p.lat       || "";
       const lon       = p.lon       || "";
       const precision = p.precision || "";
+      const estado    = p.estado    || "";
+      const motivo    = p.motivo    || "";
 
       const linkGPS = (lat && lon)
         ? `https://www.google.com/maps?q=${lat},${lon}`
@@ -1160,6 +1159,13 @@ function doGet(e) {
         return jsonOut({ status: "error", message: vHor.message });
       }
 
+      // Motivo de tardanza OBLIGATORIO: si la entrada quedó marcada "Tarde",
+      // no se ficha sin explicar por qué (el cliente lo pide con un cartel;
+      // acá se revalida por si el pedido no vino del front).
+      if (tipo === "Entrada" && estado.indexOf("Tarde") === 0 && !motivo.trim()) {
+        return jsonOut({ status: "error", message: "Falta el motivo de la llegada tarde." });
+      }
+
       if (!sheet) {
         sheet = ss.insertSheet(empleado);
         const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
@@ -1176,6 +1182,7 @@ function doGet(e) {
         sheet.setColumnWidth(5, 100);
         sheet.setColumnWidth(8, 200);
         sheet.setColumnWidth(10, 120);
+        sheet.setColumnWidth(11, 240);
       }
 
       const lastRow = sheet.getLastRow() + 1;
@@ -1201,9 +1208,10 @@ function doGet(e) {
 
       // Estado de puntualidad: lo calcula el cliente contra el horario del
       // servicio ("A tiempo" / "Tarde N min" / vacío si no aplica). Se
-      // resalta en ámbar/negrita cuando fue tarde.
-      const estado = p.estado || "";
+      // resalta en ámbar/negrita cuando fue tarde. El motivo de la tardanza
+      // (obligatorio si fue tarde) va en la columna 11.
       const estadoCell = sheet.getRange(lastRow, 10).setValue(estado);
+      sheet.getRange(lastRow, 11).setNumberFormat("@").setValue(motivo);
       if (estado.indexOf("Tarde") === 0) {
         estadoCell.setFontColor("#b45309").setFontWeight("bold");
       }
