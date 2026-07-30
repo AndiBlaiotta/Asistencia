@@ -679,7 +679,8 @@ function doGet(e) {
           lat:       lat,
           lon:       lon,
           linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
-          estado:    row[9] || ""
+          estado:    row[9] || "",
+          motivo:    (row[10] || "").toString()
         };
       }).reverse();
       return jsonOut({ status: "ok", records });
@@ -720,7 +721,8 @@ function doGet(e) {
             tipo:      row[3],
             hora:      fmtCell(row[4]),
             linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
-            estado:    row[9] || ""
+            estado:    row[9] || "",
+            motivo:    (row[10] || "").toString()
           });
         });
       });
@@ -799,7 +801,8 @@ function doGet(e) {
             tipo:      row[3],
             hora:      fmtCell(row[4]),
             linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
-            estado:    row[9] || ""
+            estado:    row[9] || "",
+            motivo:    (row[10] || "").toString()
           });
         });
       });
@@ -874,7 +877,8 @@ function doGet(e) {
         lat:      row[5],
         lon:      row[6],
         linkGPS:  typeof row[7] === "string" ? row[7] : (row[5] && row[6] ? `https://www.google.com/maps?q=${row[5]},${row[6]}` : "No disponible"),
-        estado:   row[9] || ""
+        estado:   row[9] || "",
+        motivo:   (row[10] || "").toString()
       }));
 
       return jsonOut({ status: "ok", records });

@@ -1289,6 +1289,7 @@
               <div>
                 <div class="hr-serv">${r.servicio}</div>
                 <div class="hr-hora">${r.hora}</div>
+                ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
               </div>
               <div class="hr-right">
                 <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
@@ -1588,6 +1589,7 @@
             <div>
               <div class="hr-serv">${r.empleado}</div>
               <div class="hr-hora">${r.servicio}${r.hora ? " · " + r.hora : ""}</div>
+              ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
             <div class="hr-right">
               <span class="badge badge-${(r.tipo || "").toLowerCase()}">${r.tipo}</span>
@@ -1795,6 +1797,7 @@
             <div>
               <div class="hr-serv">${r.hora}</div>
               ${mostrarDir && r.direccion ? `<div class="hr-hora">${r.direccion}</div>` : ``}
+              ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
             <div class="hr-right">
               <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
@@ -2256,6 +2259,7 @@
             <div>
               <div class="hr-serv">${r.empleado}</div>
               <div class="hr-hora">${r.hora}${r.direccion ? " · " + r.direccion : ""}</div>
+              ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
             <div class="hr-right">
               <span class="badge badge-${(r.tipo || "").toLowerCase()}">${r.tipo}</span>
