@@ -341,6 +341,7 @@
     #tab-registrar  { display: block; }
     #tab-historial  { display: none; }
     #tab-materiales { display: none; }
+    #tab-vacaciones { display: none; }
     #mat-sin-servicio { display: block; }
     #mat-con-servicio { display: none; }
 
@@ -461,6 +462,7 @@
     <button class="tab-btn active" id="tbtn-registrar"  onclick="switchTab('registrar')">📝 Registrar</button>
     <button class="tab-btn"        id="tbtn-materiales" onclick="switchTab('materiales')">📦 Materiales</button>
     <button class="tab-btn"        id="tbtn-historial"  onclick="switchTab('historial')">📋 Historial</button>
+    <button class="tab-btn"        id="tbtn-vacaciones" onclick="switchTab('vacaciones')">🏖️ Vacaciones</button>
   </div>
 
   <!-- TAB: REGISTRAR -->
@@ -516,6 +518,21 @@
     <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
   </div>
 
+  <!-- TAB: VACACIONES -->
+  <div id="tab-vacaciones">
+    <div class="section-title">Solicitar vacaciones</div>
+    <label for="vac-desde">Desde</label>
+    <input type="date" id="vac-desde" onchange="onVacFechas()">
+    <label for="vac-hasta">Hasta</label>
+    <input type="date" id="vac-hasta" onchange="onVacFechas()">
+    <div id="vac-dias" style="font-size:13px;font-weight:700;color:var(--cyan-dark);margin-top:10px;text-align:center;"></div>
+    <button class="btn btn-primary" id="vac-enviar" onclick="enviarVacaciones()" disabled>Enviar solicitud</button>
+    <div id="vac-msg" class="success" style="margin-top:10px;"></div>
+
+    <div class="section-title" style="margin-top:24px;">Mis solicitudes</div>
+    <div id="vac-lista"><div class="hist-empty">Cargando...</div></div>
+  </div>
+
   <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
   <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
 </div>
@@ -536,7 +553,8 @@
     <button class="btn btn-primary" onclick="openAdminTardanzas()" style="margin-bottom:12px;">⏰ Llegadas tarde</button>
     <button class="btn btn-primary" onclick="openAdminComprar()" style="margin-bottom:12px;">🛒 Pedidos para comprar</button>
     <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:12px;">📦 Historial de pedidos por lugar</button>
-    <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:18px;">📍 Fichadas por servicio</button>
+    <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:12px;">📍 Fichadas por servicio</button>
+    <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:18px;">🏖️ Vacaciones y suplencias</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -575,6 +593,14 @@
     <div class="section-title" style="margin-top:16px;">Llegadas tarde</div>
     <button class="btn-refresh" onclick="loadAdminTardanzas(true)">🔄 Actualizar</button>
     <div id="admin-tardanzas"></div>
+  </div>
+
+  <!-- VACACIONES: solicitudes, aprobación y asignación de suplentes -->
+  <div id="admin-step-vacaciones" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Solicitudes de vacaciones</div>
+    <button class="btn-refresh" onclick="loadAdminVacaciones(true)">🔄 Actualizar</button>
+    <div id="admin-vacaciones"></div>
   </div>
 
   <!-- LISTA DE SERVICIOS: todos los servicios de la empresa (accesos separados) -->
@@ -748,8 +774,44 @@
   function serviciosDe(empleado) {
     return [...(SERVICIOS[empleado] || []), HORAS_EXTRAS, SUPLENCIAS];
   }
-  // Servicios que se muestran en la pestaña Registrar para el empleado actual.
-  function serviciosRegistro() { return serviciosDe(currentUser); }
+
+  // Coberturas ACTIVAS del empleado actual (servicios que cubre por vacaciones
+  // de otro, solo durante el período). Se cargan al entrar; ver cargarCoberturas.
+  let coberturasActivas = [];
+
+  // Un servicio "cubierto" se muestra como uno normal, con la dirección y el
+  // horario reales del titular (los saca de SERVICIOS[titular]).
+  function servicioCubiertoObj(c) {
+    const s = (SERVICIOS[c.titular] || []).find(x => x.nombre === c.servicio);
+    return {
+      nombre: c.servicio,
+      dir: s ? s.dir : "",
+      horario: s ? s.horario : null,
+      cobertura: true, titular: c.titular, hasta: c.hasta
+    };
+  }
+
+  // Servicios que se muestran en la pestaña Registrar para el empleado actual:
+  // los suyos + Horas Extras/Suplencias + los que está cubriendo hoy.
+  function serviciosRegistro() {
+    return [...serviciosDe(currentUser), ...coberturasActivas.map(servicioCubiertoObj)];
+  }
+
+  // Trae las coberturas activas de hoy y refresca la lista de servicios.
+  async function cargarCoberturas() {
+    try {
+      const j = await fetchJson({
+        action: "misCoberturas", empleado: currentUser, hash: currentHash,
+        fecha: new Date().toLocaleDateString("es-AR")
+      });
+      coberturasActivas = (j.status === "ok" && j.records) ? j.records : [];
+    } catch (e) {
+      coberturasActivas = [];
+    }
+    if (document.getElementById("screen-home").style.display !== "none" && !selectedService) {
+      renderServices();
+    }
+  }
 
   // Tolerancia de tardanza (minutos) para las fichadas de Entrada.
   const TOLERANCIA_TARDE_MIN = 10;
@@ -858,6 +920,7 @@
     startClock();
     getLocation();
     renderServices();
+    cargarCoberturas();
   }
 
   // Al abrir la app, restaurar sesión si hay una guardada.
@@ -992,6 +1055,7 @@
     clearInterval(clockInterval);
     currentUser = currentHash = currentCoords = selectedService = null;
     adminEmpleado = adminServicio = null;
+    coberturasActivas = [];
     adminRecordsCache = { empleado: null, records: null };
     document.getElementById("screen-home").style.display  = "none";
     document.getElementById("screen-admin").style.display = "none";
@@ -1057,11 +1121,12 @@
     const list = document.getElementById("service-list");
 
     list.innerHTML = servicios.map((s, i) => `
-      <button class="service-card" onclick="selectService(${i})">
+      <button class="service-card" onclick="selectService(${i})"${s.cobertura ? ' style="border-left-color:#0071A8;"' : ""}>
         <div>
           <div class="s-nombre">${s.nombre}</div>
           <div class="s-dir">${s.custom ? "✍️ Escribís la dirección al fichar" : s.dir}</div>
           ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
+          ${s.cobertura ? `<div class="s-dir" style="color:#0071A8;font-weight:700;margin-top:2px;">🔁 Cubriendo a ${s.titular} · hasta ${s.hasta}</div>` : ""}
         </div>
         <span class="s-arrow">›</span>
       </button>
@@ -1244,14 +1309,101 @@
 
   // ---------- TABS ----------
   function switchTab(tab) {
-    document.getElementById("tab-registrar").style.display  = tab === "registrar"  ? "block" : "none";
-    document.getElementById("tab-materiales").style.display = tab === "materiales" ? "block" : "none";
-    document.getElementById("tab-historial").style.display  = tab === "historial"  ? "block" : "none";
-    document.getElementById("tbtn-registrar").classList.toggle("active", tab === "registrar");
-    document.getElementById("tbtn-materiales").classList.toggle("active", tab === "materiales");
-    document.getElementById("tbtn-historial").classList.toggle("active", tab === "historial");
+    ["registrar", "materiales", "historial", "vacaciones"].forEach(t => {
+      document.getElementById("tab-" + t).style.display = tab === t ? "block" : "none";
+      document.getElementById("tbtn-" + t).classList.toggle("active", tab === t);
+    });
     if (tab === "historial")  cargarHistorial();
     if (tab === "materiales") renderMaterialesTab();
+    if (tab === "vacaciones") cargarMisVacaciones();
+  }
+
+  // Helper: fetch con JSON (comparte armado de URL para acciones nuevas).
+  async function fetchJson(params) {
+    const url = APPS_SCRIPT_URL + "?" + new URLSearchParams(params).toString();
+    const res = await fetch(url, { redirect: "follow" });
+    return res.json();
+  }
+
+  // ---------- VACACIONES (empleado) ----------
+  // "yyyy-MM-dd" (input date) -> "dd/MM/yyyy" (formato del resto de la app).
+  function isoToDMY(iso) {
+    const p = (iso || "").split("-");
+    return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : "";
+  }
+
+  // Al elegir fechas: calcula y muestra los días, y habilita el botón.
+  function onVacFechas() {
+    const d = document.getElementById("vac-desde").value;
+    const h = document.getElementById("vac-hasta").value;
+    const el = document.getElementById("vac-dias");
+    const btn = document.getElementById("vac-enviar");
+    if (d && h && Date.parse(h) >= Date.parse(d)) {
+      const dias = Math.round((Date.parse(h) - Date.parse(d)) / 86400000) + 1;
+      el.textContent = `${dias} ${dias === 1 ? "día" : "días"} de vacaciones`;
+      btn.disabled = false;
+    } else {
+      el.textContent = (d && h) ? "⚠️ 'Hasta' no puede ser antes que 'Desde'" : "";
+      btn.disabled = true;
+    }
+  }
+
+  async function enviarVacaciones() {
+    const desdeIso = document.getElementById("vac-desde").value;
+    const hastaIso = document.getElementById("vac-hasta").value;
+    const msg = document.getElementById("vac-msg");
+    if (!desdeIso || !hastaIso) { msg.className = "error"; msg.textContent = "Elegí las dos fechas."; return; }
+    if (Date.parse(hastaIso) < Date.parse(desdeIso)) {
+      msg.className = "error"; msg.textContent = "La fecha 'hasta' es anterior a 'desde'."; return;
+    }
+    const btn = document.getElementById("vac-enviar");
+    btn.disabled = true;
+    msg.className = "success"; msg.textContent = "Enviando...";
+    try {
+      const j = await fetchJson({
+        action: "solicitarVacaciones", empleado: currentUser, hash: currentHash,
+        desde: isoToDMY(desdeIso), hasta: isoToDMY(hastaIso)
+      });
+      if (j.status !== "ok") {
+        msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo enviar.");
+        btn.disabled = false; return;
+      }
+      msg.className = "success"; msg.textContent = "✅ Solicitud enviada.";
+      document.getElementById("vac-desde").value = "";
+      document.getElementById("vac-hasta").value = "";
+      onVacFechas();
+      cargarMisVacaciones();
+    } catch (e) {
+      msg.className = "error"; msg.textContent = "❌ " + e.message; btn.disabled = false;
+    }
+  }
+
+  // Badge de estado de una solicitud (compartido empleado/admin).
+  function vacEstadoBadge(estado) {
+    if (estado === "Aceptada")  return `<span class="badge badge-entrada">✅ Aceptada</span>`;
+    if (estado === "Rechazada") return `<span class="badge badge-salida">Rechazada</span>`;
+    return `<span class="badge" style="background:#fef3c7;color:#b45309;">⏳ Pendiente</span>`;
+  }
+
+  async function cargarMisVacaciones() {
+    const el = document.getElementById("vac-lista");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "misVacaciones", empleado: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      const recs = j.records || [];
+      if (!recs.length) { el.innerHTML = `<div class="hist-empty">No enviaste solicitudes todavía.</div>`; return; }
+      el.innerHTML = recs.map(r => `
+        <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
+          <div>
+            <div class="hr-serv">${r.desde} → ${r.hasta}</div>
+            <div class="hr-hora">${r.dias} ${r.dias == 1 ? "día" : "días"} · pedido ${r.solicitado}</div>
+          </div>
+          ${vacEstadoBadge(r.estado)}
+        </div>`).join("");
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
   }
 
   // ---------- CARGAR HISTORIAL DESDE SHEETS ----------
@@ -1519,6 +1671,7 @@
     document.getElementById("admin-step-tardanzas").style.display  = step === "tardanzas" ? "block" : "none";
     document.getElementById("admin-step-servicioglobal").style.display = step === "servicioglobal" ? "block" : "none";
     document.getElementById("admin-step-servicioslista").style.display = step === "servicioslista" ? "block" : "none";
+    document.getElementById("admin-step-vacaciones").style.display = step === "vacaciones" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -2275,6 +2428,118 @@
         `).join("")}
       </div>`;
     }).join("");
+  }
+
+  // ---------- VACACIONES / COBERTURAS (admin) ----------
+  let adminVacacionesCache = null, adminCoberturasCache = null;
+
+  function openAdminVacaciones() {
+    adminShowStep("vacaciones");
+    loadAdminVacaciones(false);
+  }
+
+  async function loadAdminVacaciones() {
+    const el = document.getElementById("admin-vacaciones");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando solicitudes...</div>`;
+    try {
+      const [v, c] = await Promise.all([
+        fetchJson({ action: "adminVacaciones", admin: currentUser, hash: currentHash }),
+        fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash })
+      ]);
+      if (v.status !== "ok") throw new Error(v.message || "No se pudo cargar.");
+      adminVacacionesCache = v.records || [];
+      adminCoberturasCache = (c.status === "ok" && c.records) ? c.records : [];
+      renderAdminVacaciones();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  // id de elemento válido a partir del nombre del servicio.
+  function cssId(s) { return (s || "").replace(/[^a-zA-Z0-9]/g, "_"); }
+
+  function renderAdminVacaciones() {
+    const el = document.getElementById("admin-vacaciones");
+    const vacs = adminVacacionesCache || [];
+    if (!vacs.length) { el.innerHTML = `<div class="hist-empty">No hay solicitudes de vacaciones.</div>`; return; }
+    const orden = { Pendiente: 0, Aceptada: 1, Rechazada: 2 };
+    const val = e => (orden[e] === undefined ? 9 : orden[e]);
+    const sorted = vacs.slice().sort((a, b) => val(a.estado) - val(b.estado));
+    el.innerHTML = sorted.map(v => {
+      let acciones = "";
+      if (v.estado === "Pendiente") {
+        acciones = `<div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn-mini btn-recibido" onclick="resolverVac('${v.id}','Aceptada')">✅ Aceptar</button>
+          <button class="btn-mini btn-anular" onclick="resolverVac('${v.id}','Rechazada')">❌ Rechazar</button>
+        </div>`;
+      } else if (v.estado === "Aceptada") {
+        acciones = `<div class="section-title" style="margin-top:12px;">Servicios que quedan libres · asignar suplente</div>${renderFreedServices(v)}`;
+      }
+      return `
+        <div style="border:1.5px solid var(--border);border-left:4px solid var(--cyan);border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+              <div class="s-nombre">${v.empleado}</div>
+              <div class="s-dir">${v.desde} → ${v.hasta} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
+            </div>
+            ${vacEstadoBadge(v.estado)}
+          </div>
+          ${acciones}
+        </div>`;
+    }).join("");
+  }
+
+  // Servicios que quedan libres por la licencia (los propios del empleado). Cada
+  // uno con su suplente asignado, o un selector para asignarlo.
+  function renderFreedServices(v) {
+    const servicios = SERVICIOS[v.empleado] || [];
+    if (!servicios.length) return `<div class="hist-empty" style="padding:8px 0;">Este empleado no tiene servicios propios.</div>`;
+    const otros = Object.keys(SERVICIOS).filter(e => e !== v.empleado);
+    return servicios.map(s => {
+      const cob = (adminCoberturasCache || []).find(c => c.vacacionId === v.id && c.servicio === s.nombre);
+      if (cob) {
+        return `<div class="mat-item comprado">
+          <div><div class="mat-nombre">${s.nombre}</div>
+               <div class="mat-fecha comprado">🔁 Cubre: ${cob.suplente}</div></div>
+          <button class="btn-mini btn-anular" onclick="quitarCob('${cob.id}')">Quitar</button>
+        </div>`;
+      }
+      const selId = `sup-${v.id}-${cssId(s.nombre)}`;
+      return `<div class="mat-item">
+        <div style="flex:1;min-width:0;">
+          <div class="mat-nombre">${s.nombre}</div>
+          <select id="${selId}" style="margin-top:6px;">
+            <option value="">-- Asignar suplente --</option>
+            ${otros.map(e => `<option value="${e}">${e}</option>`).join("")}
+          </select>
+        </div>
+        <button class="btn-mini btn-pedir" onclick="asignarCob('${v.id}','${encodeURIComponent(s.nombre)}','${selId}')">Asignar</button>
+      </div>`;
+    }).join("");
+  }
+
+  async function resolverVac(id, estado) {
+    const txt = estado === "Aceptada" ? "aceptar" : "rechazar";
+    if (!confirm(`¿Seguro que querés ${txt} esta solicitud de vacaciones?`)) return;
+    const j = await fetchJson({ action: "resolverVacaciones", admin: currentUser, hash: currentHash, id, estado });
+    if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
+    loadAdminVacaciones();
+  }
+
+  async function asignarCob(vacId, servEnc, selId) {
+    const servicio = decodeURIComponent(servEnc);
+    const suplente = document.getElementById(selId).value;
+    if (!suplente) { alert("Elegí un empleado para asignar."); return; }
+    const j = await fetchJson({ action: "asignarCobertura", admin: currentUser, hash: currentHash, vacacionId: vacId, servicio, suplente });
+    if (j.status !== "ok") { alert(j.message || "No se pudo asignar."); return; }
+    loadAdminVacaciones();
+  }
+
+  async function quitarCob(id) {
+    if (!confirm("¿Quitar esta cobertura? El suplente dejará de poder fichar ese servicio.")) return;
+    const j = await fetchJson({ action: "quitarCobertura", admin: currentUser, hash: currentHash, id });
+    if (j.status !== "ok") { alert(j.message || "No se pudo quitar."); return; }
+    loadAdminVacaciones();
   }
 
   // ---------- ARRANQUE ----------

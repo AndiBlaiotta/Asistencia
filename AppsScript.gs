@@ -38,7 +38,17 @@ const HEADERS = [
 
 // Hojas que NO son de empleados (no llevan fichadas): se saltean al recorrer
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
-const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth"];
+const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
+                           "Vacaciones", "Coberturas"];
+
+// ---- Vacaciones / Coberturas ----
+// "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
+// "Coberturas": qué servicio cubre qué suplente durante el período de una
+// licencia aceptada (le habilita fichar ese servicio solo en esas fechas).
+const VACAS_SHEET   = "Vacaciones";
+const VACAS_HEADERS = ["ID", "Empleado", "Desde", "Hasta", "Días", "Estado", "Solicitado", "Resuelto"];
+const COBERTURAS_SHEET   = "Coberturas";
+const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente", "Desde", "Hasta", "Asignado"];
 
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
 const PRODUCTOS = [
@@ -595,6 +605,79 @@ function yaHayEntradaHoy(sheet, servicio, fecha) {
   return false;
 }
 
+// ---- Helpers de fechas para vacaciones/coberturas (formato dd/MM/yyyy) ----
+// yyyymmdd como entero comparable (o NaN). Sirve para "¿hoy está en el rango?".
+function fechaAInt(fechaStr) {
+  const m = (fechaStr || "").toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!m) return NaN;
+  return Number(m[3]) * 10000 + Number(m[2]) * 100 + Number(m[1]);
+}
+function fechaADate(fechaStr) {
+  const m = (fechaStr || "").toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+}
+// Cantidad de días entre dos fechas, inclusive (desde y hasta cuentan).
+function diasEntre(desde, hasta) {
+  const a = fechaADate(desde), b = fechaADate(hasta);
+  if (!a || !b) return "";
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+function getVacacionesSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(VACAS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(VACAS_SHEET);
+    sheet.appendRow(VACAS_HEADERS);
+    sheet.getRange(1, 1, 1, VACAS_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+function getCoberturasSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(COBERTURAS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(COBERTURAS_SHEET);
+    sheet.appendRow(COBERTURAS_HEADERS);
+    sheet.getRange(1, 1, 1, COBERTURAS_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+// ¿El empleado tiene una cobertura ACTIVA (hoy en el rango) para ese servicio?
+// Devuelve el registro de cobertura o null. Sirve para habilitar la fichada de
+// un suplente y para validar el horario contra el titular.
+function coberturaActiva(suplente, servicio, fecha) {
+  const sheet = getCoberturasSheet();
+  if (sheet.getLastRow() <= 1) return null;
+  const hoy = fechaAInt(fecha);
+  if (isNaN(hoy)) return null;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i];
+    if ((r[4] || "").toString() === suplente && (r[2] || "").toString() === servicio) {
+      const d = fechaAInt(r[5]), h = fechaAInt(r[6]);
+      if (!isNaN(d) && !isNaN(h) && hoy >= d && hoy <= h) {
+        return { id: r[0], vacacionId: r[1], servicio: r[2], titular: r[3], suplente: r[4], desde: r[5], hasta: r[6] };
+      }
+    }
+  }
+  return null;
+}
+
+// Empleado cuyo HORARIO usar para validar la fichada: el propio si el servicio
+// es suyo; si lo está cubriendo (vacaciones de otro), el del titular.
+function empleadoHorarioEfectivo(empleado, servicio, fecha) {
+  if ((HORARIOS[empleado] || {})[servicio]) return empleado;
+  const cob = coberturaActiva(empleado, servicio, fecha);
+  return cob ? cob.titular : empleado;
+}
+
 // Conjunto de nombres de servicio válidos: los reales (todos figuran en
 // HORARIOS) + los libres (Horas Extras / Suplencias). Sirve para validar el
 // parámetro `servicio` de adminServicioGlobal contra una lista conocida.
@@ -1101,6 +1184,193 @@ function doGet(e) {
     }
   }
 
+  // ==========================================================
+  // VACACIONES / COBERTURAS
+  // ==========================================================
+
+  // ---- El empleado solicita vacaciones (queda Pendiente) ----
+  if (p.action === "solicitarVacaciones" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    const desde = (p.desde || "").toString(), hasta = (p.hasta || "").toString();
+    const di = fechaAInt(desde), hi = fechaAInt(hasta);
+    if (isNaN(di) || isNaN(hi)) return jsonOut({ status: "error", message: "Fechas inválidas" });
+    if (hi < di) return jsonOut({ status: "error", message: "La fecha 'hasta' es anterior a 'desde'" });
+    try {
+      const sheet = getVacacionesSheet();
+      const dias  = diasEntre(desde, hasta);
+      const id    = Utilities.getUuid().slice(0, 8);
+      const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      const row   = sheet.getLastRow() + 1;
+      sheet.getRange(row, 1, 1, VACAS_HEADERS.length).setNumberFormat("@")
+        .setValues([[id, p.empleado, desde, hasta, String(dias), "Pendiente", now, ""]]);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado ve sus propias solicitudes y su estado ----
+  if (p.action === "misVacaciones" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getVacacionesSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
+      const records = data
+        .filter(r => (r[1] || "").toString() === p.empleado)
+        .map(r => ({ id: r[0], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6] }))
+        .reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: ver todas las solicitudes de vacaciones ----
+  if (p.action === "adminVacaciones") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getVacacionesSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
+      const records = data.map(r => ({
+        id: r[0], empleado: r[1], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6]
+      })).reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: aceptar o rechazar una solicitud ----
+  if (p.action === "resolverVacaciones" && p.id && p.estado) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (["Aceptada", "Rechazada", "Pendiente"].indexOf(p.estado) === -1) {
+      return jsonOut({ status: "error", message: "Estado inválido" });
+    }
+    try {
+      const sheet = getVacacionesSheet();
+      const last  = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay solicitudes" });
+      const ids = sheet.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "Solicitud no encontrada" });
+      const row = idx + 2;
+      sheet.getRange(row, 6).setValue(p.estado);
+      sheet.getRange(row, 8).setNumberFormat("@")
+        .setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"));
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: asignar un suplente a un servicio de una licencia aceptada ----
+  if (p.action === "asignarCobertura" && p.vacacionId && p.servicio && p.suplente) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (!esEmpleado(p.suplente)) return jsonOut({ status: "error", message: "Suplente inválido" });
+    if (!serviciosConocidos()[p.servicio]) return jsonOut({ status: "error", message: "Servicio inválido" });
+    try {
+      const vs = getVacacionesSheet();
+      if (vs.getLastRow() <= 1) return jsonOut({ status: "error", message: "Vacación no encontrada" });
+      const vdata = vs.getRange(2, 1, vs.getLastRow() - 1, VACAS_HEADERS.length).getValues();
+      const v = vdata.find(r => (r[0] || "").toString() === p.vacacionId);
+      if (!v) return jsonOut({ status: "error", message: "Vacación no encontrada" });
+      if ((v[5] || "").toString() !== "Aceptada") {
+        return jsonOut({ status: "error", message: "La vacación no está aceptada" });
+      }
+      const titular = v[1], desde = v[2], hasta = v[3];
+      if (p.suplente === titular) {
+        return jsonOut({ status: "error", message: "El suplente no puede ser el mismo empleado" });
+      }
+      const cs = getCoberturasSheet();
+      if (cs.getLastRow() > 1) {
+        const cdata = cs.getRange(2, 1, cs.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
+        if (cdata.some(r => (r[1] || "").toString() === p.vacacionId && (r[2] || "").toString() === p.servicio)) {
+          return jsonOut({ status: "error", message: "Ese servicio ya tiene un suplente asignado" });
+        }
+      }
+      const id  = Utilities.getUuid().slice(0, 8);
+      const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      const row = cs.getLastRow() + 1;
+      cs.getRange(row, 1, 1, COBERTURAS_HEADERS.length).setNumberFormat("@")
+        .setValues([[id, p.vacacionId, p.servicio, titular, p.suplente, desde, hasta, now]]);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: quitar una cobertura ----
+  if (p.action === "quitarCobertura" && p.id) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const cs = getCoberturasSheet();
+      const last = cs.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay coberturas" });
+      const ids = cs.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "Cobertura no encontrada" });
+      cs.deleteRow(idx + 2);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: ver todas las coberturas asignadas ----
+  if (p.action === "adminCoberturas") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const cs = getCoberturasSheet();
+      if (cs.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = cs.getRange(2, 1, cs.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
+      const records = data.map(r => ({
+        id: r[0], vacacionId: r[1], servicio: r[2], titular: r[3], suplente: r[4], desde: r[5], hasta: r[6]
+      }));
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado ve las coberturas ACTIVAS que tiene que cubrir hoy ----
+  // (para mostrar ese servicio en su lista de fichar solo durante el período).
+  if (p.action === "misCoberturas" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const cs = getCoberturasSheet();
+      if (cs.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = cs.getRange(2, 1, cs.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
+      const hoy = fechaAInt(p.fecha ||
+        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy"));
+      const records = data.filter(r => {
+        if ((r[4] || "").toString() !== p.empleado) return false;
+        const d = fechaAInt(r[5]), h = fechaAInt(r[6]);
+        return !isNaN(d) && !isNaN(h) && !isNaN(hoy) && hoy >= d && hoy <= h;
+      }).map(r => ({ servicio: r[2], titular: r[3], desde: r[5], hasta: r[6] }));
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- REGISTRAR ENTRADA/SALIDA ----
   if (p.empleado) {
     if (!checkAuth(p.empleado, p.hash)) {
@@ -1161,7 +1431,10 @@ function doGet(e) {
       // de la entrada abierta (permite salir más tarde si entró tarde).
       const entradaMin = (tipo === "Salida" && ultima && ultima.tipo === "Entrada")
         ? horaAMin(ultima.hora) : null;
-      const vHor = validarHorarioFichada(empleado, servicio, fecha, hora, tipo, entradaMin);
+      // Si el empleado está cubriendo el servicio (vacaciones de otro), el
+      // horario a validar es el del TITULAR de ese servicio, no el suyo.
+      const empHor = empleadoHorarioEfectivo(empleado, servicio, fecha);
+      const vHor = validarHorarioFichada(empHor, servicio, fecha, hora, tipo, entradaMin);
       if (!vHor.ok) {
         return jsonOut({ status: "error", message: vHor.message });
       }
