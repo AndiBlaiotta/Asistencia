@@ -50,6 +50,26 @@ const VACAS_HEADERS = ["ID", "Empleado", "Desde", "Hasta", "Días", "Estado", "S
 const COBERTURAS_SHEET   = "Coberturas";
 const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente", "Desde", "Hasta", "Asignado"];
 
+// Config de vacaciones por empleado. `alta` = fecha de ingreso (dd/MM/yyyy).
+// `tomadasPrevias` = días ya tomados fuera del sistema (histórico, arranque).
+// El cupo que le corresponde se calcula solo (ver cupoVacaciones):
+//   - Con >= 1 año de antigüedad cumplido: 14 días × años cumplidos (renueva
+//     cada aniversario del ingreso).
+//   - En el primer año (todavía sin cumplir el año): 1 día cada 20 días
+//     corridos desde el alta, con tope de 14.
+// Cuando cambien las antigüedades/números, editar acá y redeployar.
+const VACAS_DIAS_POR_ANIO = 14;
+const VACAS_CONFIG = {
+  "Maria Decimas":    { alta: "20/01/2025", tomadasPrevias: 7 },
+  "Celeste Freire":   { alta: "01/04/2025", tomadasPrevias: 10 },
+  "Rocio Medina":     { alta: "02/05/2025", tomadasPrevias: 7 },
+  "Brisa Medina":     { alta: "16/03/2026", tomadasPrevias: 0 },
+  "Sabrina Scarampo": { alta: "16/03/2026", tomadasPrevias: 0 },
+  "Rebeca Ayala":     { alta: "15/05/2026", tomadasPrevias: 0 },
+  "Alejandro Jelvez": { alta: "01/06/2026", tomadasPrevias: 0 },
+  "Milagros Acuña":   { alta: "01/07/2026", tomadasPrevias: 0 }
+};
+
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
 const PRODUCTOS = [
   'Guantes "Steff"',
@@ -622,6 +642,59 @@ function diasEntre(desde, hasta) {
   const a = fechaADate(desde), b = fechaADate(hasta);
   if (!a || !b) return "";
   return Math.round((b - a) / 86400000) + 1;
+}
+
+// ---- Cupo y saldo de vacaciones ----
+// Años de antigüedad cumplidos entre `alta` y `hoy` (aniversarios pasados).
+function aniosCumplidos(alta, hoy) {
+  const a = fechaADate(alta), h = fechaADate(hoy);
+  if (!a || !h) return 0;
+  let years = h.getFullYear() - a.getFullYear();
+  if (h.getMonth() < a.getMonth() ||
+      (h.getMonth() === a.getMonth() && h.getDate() < a.getDate())) years--;
+  return Math.max(0, years);
+}
+function diasCorridosDesde(alta, hoy) {
+  const a = fechaADate(alta), h = fechaADate(hoy);
+  if (!a || !h) return 0;
+  return Math.max(0, Math.round((h - a) / 86400000));
+}
+// Días que le CORRESPONDEN hoy a un empleado (cupo total acumulado).
+function cupoVacaciones(empleado, hoy) {
+  const cfg = VACAS_CONFIG[empleado];
+  if (!cfg) return 0;
+  const ac = aniosCumplidos(cfg.alta, hoy);
+  if (ac >= 1) return VACAS_DIAS_POR_ANIO * ac;
+  // Primer año: proporcional 1 cada 20 días corridos, tope 14.
+  return Math.min(VACAS_DIAS_POR_ANIO, Math.floor(diasCorridosDesde(cfg.alta, hoy) / 20));
+}
+// Saldo completo: { corresponden, tomados, reservados (pendientes de aprobar),
+// disponibles, alta }. `tomados` = históricos + aprobadas en el sistema.
+function saldoVacaciones(empleado) {
+  const hoy = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy");
+  const corresponden = cupoVacaciones(empleado, hoy);
+  const cfg = VACAS_CONFIG[empleado] || {};
+  const previas = cfg.tomadasPrevias || 0;
+  let aprobadas = 0, reservados = 0;
+  const sheet = getVacacionesSheet();
+  if (sheet.getLastRow() > 1) {
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
+    data.forEach(r => {
+      if ((r[1] || "").toString() !== empleado) return;
+      const d = parseInt(r[4], 10) || 0;
+      const estado = (r[5] || "").toString();
+      if (estado === "Aceptada") aprobadas += d;
+      else if (estado === "Pendiente") reservados += d;
+    });
+  }
+  const tomados = previas + aprobadas;
+  return {
+    corresponden: corresponden,
+    tomados: tomados,
+    reservados: reservados,
+    disponibles: corresponden - tomados - reservados,
+    alta: cfg.alta || ""
+  };
 }
 
 function getVacacionesSheet() {
@@ -1197,9 +1270,21 @@ function doGet(e) {
     const di = fechaAInt(desde), hi = fechaAInt(hasta);
     if (isNaN(di) || isNaN(hi)) return jsonOut({ status: "error", message: "Fechas inválidas" });
     if (hi < di) return jsonOut({ status: "error", message: "La fecha 'hasta' es anterior a 'desde'" });
+    const dias = diasEntre(desde, hasta);
+    if (typeof dias !== "number" || dias < 1) return jsonOut({ status: "error", message: "Fechas inválidas" });
+    // Validar contra el saldo y la regla de 7 (con la excepción de <7 disponibles).
+    const saldo = saldoVacaciones(p.empleado);
+    if (saldo.disponibles <= 0) {
+      return jsonOut({ status: "error", message: "No tenés días de vacaciones disponibles." });
+    }
+    if (dias > saldo.disponibles) {
+      return jsonOut({ status: "error", message: `No te alcanzan los días: pediste ${dias} y te quedan ${saldo.disponibles}.` });
+    }
+    if (saldo.disponibles >= 7 && dias % 7 !== 0) {
+      return jsonOut({ status: "error", message: "Tenés que pedir 7 días o múltiplos de 7 (7, 14, 21...)." });
+    }
     try {
       const sheet = getVacacionesSheet();
-      const dias  = diasEntre(desde, hasta);
       const id    = Utilities.getUuid().slice(0, 8);
       const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
       const row   = sheet.getLastRow() + 1;
@@ -1217,14 +1302,15 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
+      const saldo = saldoVacaciones(p.empleado);
       const sheet = getVacacionesSheet();
-      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [], saldo });
       const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
       const records = data
         .filter(r => (r[1] || "").toString() === p.empleado)
         .map(r => ({ id: r[0], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6] }))
         .reverse();
-      return jsonOut({ status: "ok", records });
+      return jsonOut({ status: "ok", records, saldo });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }

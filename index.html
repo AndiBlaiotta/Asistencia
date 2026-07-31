@@ -520,6 +520,7 @@
 
   <!-- TAB: VACACIONES -->
   <div id="tab-vacaciones">
+    <div id="vac-saldo"></div>
     <div class="section-title">Solicitar vacaciones</div>
     <label for="vac-desde">Desde</label>
     <input type="date" id="vac-desde" onchange="onVacFechas()">
@@ -1056,6 +1057,7 @@
     currentUser = currentHash = currentCoords = selectedService = null;
     adminEmpleado = adminServicio = null;
     coberturasActivas = [];
+    misVacacionesSaldo = null;
     adminRecordsCache = { empleado: null, records: null };
     document.getElementById("screen-home").style.display  = "none";
     document.getElementById("screen-admin").style.display = "none";
@@ -1332,20 +1334,28 @@
     return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : "";
   }
 
-  // Al elegir fechas: calcula y muestra los días, y habilita el botón.
+  // Al elegir fechas: calcula los días, valida contra el saldo y la regla de 7,
+  // y habilita/bloquea el botón con el aviso correspondiente.
   function onVacFechas() {
     const d = document.getElementById("vac-desde").value;
     const h = document.getElementById("vac-hasta").value;
     const el = document.getElementById("vac-dias");
     const btn = document.getElementById("vac-enviar");
-    if (d && h && Date.parse(h) >= Date.parse(d)) {
-      const dias = Math.round((Date.parse(h) - Date.parse(d)) / 86400000) + 1;
-      el.textContent = `${dias} ${dias === 1 ? "día" : "días"} de vacaciones`;
-      btn.disabled = false;
-    } else {
-      el.textContent = (d && h) ? "⚠️ 'Hasta' no puede ser antes que 'Desde'" : "";
-      btn.disabled = true;
+    if (!(d && h)) { el.textContent = ""; el.style.color = ""; btn.disabled = true; return; }
+    if (Date.parse(h) < Date.parse(d)) {
+      el.style.color = "#dc2626"; el.textContent = "⚠️ 'Hasta' no puede ser antes que 'Desde'"; btn.disabled = true; return;
     }
+    const dias = Math.round((Date.parse(h) - Date.parse(d)) / 86400000) + 1;
+    const disp = misVacacionesSaldo ? Math.max(0, misVacacionesSaldo.disponibles) : null;
+    let aviso = "", ok = true;
+    if (disp != null && dias > disp) {
+      aviso = ` · ⚠️ más de tus ${disp} disponibles`; ok = false;
+    } else if (disp != null && disp >= 7 && dias % 7 !== 0) {
+      aviso = " · ⚠️ tienen que ser 7 o múltiplos de 7"; ok = false;
+    }
+    el.style.color = ok ? "var(--cyan-dark)" : "#dc2626";
+    el.textContent = `${dias} ${dias === 1 ? "día" : "días"}${aviso}`;
+    btn.disabled = !ok;
   }
 
   async function enviarVacaciones() {
@@ -1385,12 +1395,41 @@
     return `<span class="badge" style="background:#fef3c7;color:#b45309;">⏳ Pendiente</span>`;
   }
 
+  // Saldo de vacaciones del empleado (lo devuelve misVacaciones). Se usa para
+  // mostrar el resumen y validar los pedidos del lado del cliente.
+  let misVacacionesSaldo = null;
+
+  function renderVacSaldo() {
+    const el = document.getElementById("vac-saldo");
+    const s = misVacacionesSaldo;
+    if (!s) { el.innerHTML = ""; return; }
+    const disp = Math.max(0, s.disponibles);
+    const reserva = s.reservados
+      ? `<div style="font-size:12px;color:#b45309;font-weight:600;margin-top:2px;">⏳ ${s.reservados} pendientes de aprobación</div>` : "";
+    el.innerHTML = `
+      <div style="background:var(--cyan-light);border:1.5px solid var(--cyan-mid);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--black);">
+          <span>Te corresponden</span><span>${s.corresponden} días</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--gray);margin-top:4px;">
+          <span>Ya tomaste</span><span>${s.tomados} días</span>
+        </div>
+        ${reserva}
+        <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:900;color:var(--cyan-dark);margin-top:6px;padding-top:6px;border-top:1px solid var(--cyan-mid);">
+          <span>Disponibles</span><span>${disp} días</span>
+        </div>
+      </div>`;
+  }
+
   async function cargarMisVacaciones() {
     const el = document.getElementById("vac-lista");
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
       const j = await fetchJson({ action: "misVacaciones", empleado: currentUser, hash: currentHash });
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      misVacacionesSaldo = j.saldo || null;
+      renderVacSaldo();
+      onVacFechas();
       const recs = j.records || [];
       if (!recs.length) { el.innerHTML = `<div class="hist-empty">No enviaste solicitudes todavía.</div>`; return; }
       el.innerHTML = recs.map(r => `
