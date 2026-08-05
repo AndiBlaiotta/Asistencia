@@ -859,6 +859,105 @@ function empleadoHorarioEfectivo(empleado, servicio, fecha) {
   return cob ? cob.titular : empleado;
 }
 
+// ---- Horas extra ----
+// Horas semanales de contrato de un empleado (jornada completa 44 / reducida 24).
+function horasContratoSemanal(empleado) {
+  return empleado === "Milagros Acuña" ? 24 : 44;
+}
+// Lunes (00:00) de la semana de una fecha (semana de lunes a domingo).
+function lunesDeSemana(date) {
+  const d = new Date(date.getTime());
+  const off = (d.getDay() + 6) % 7;      // 0=lunes … 6=domingo
+  d.setDate(d.getDate() - off);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+// Horas extra por mes de un empleado. Trabajadas = duración PROGRAMADA de los
+// turnos regulares a los que fichó entrada (la tardanza no descuenta) + duración
+// REAL (entrada→salida) de "Horas Extras"/"Suplencias". Extra semanal = max(0,
+// trabajadas − contrato); se suma por mes (mes del lunes de esa semana). Las
+// tardanzas se cuentan aparte (señaladas, no descontadas). Mira ~120 días atrás.
+function horasExtraDe(empleado) {
+  const servHor = HORARIOS[empleado] || {};
+  const contrato = horasContratoSemanal(empleado);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(empleado);
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const tz = Session.getScriptTimeZone();
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const desde = new Date(hoy.getTime() - 120 * 86400000);
+  const minInt = desde.getFullYear() * 10000 + (desde.getMonth() + 1) * 100 + desde.getDate();
+
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  const weekWorked = {};   // wkInt -> minutos trabajados
+  const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
+  const tardMes    = {};   // "yyyy-MM" -> cantidad de tardanzas
+  const extras     = {};   // "servicio|fechaInt" -> {ent:[], sal:[], wk}
+
+  data.forEach(row => {
+    const fechaStr = fmtCell(row[0]);
+    const fi = fechaAInt(fechaStr);
+    if (isNaN(fi) || fi < minInt) return;
+    const servicio = (row[1] || "").toString();
+    const tipo     = (row[3] || "").toString();
+    const estado   = (row[9] || "").toString();
+    const dObj = fechaADate(fechaStr);
+    if (!dObj) return;
+    const dow   = dObj.getDay();
+    const lunes = lunesDeSemana(dObj);
+    const wk    = lunes.getFullYear() * 10000 + (lunes.getMonth() + 1) * 100 + lunes.getDate();
+    weekMonth[wk] = Utilities.formatDate(lunes, tz, "yyyy-MM");
+
+    if (tipo === "Entrada" && estado.indexOf("Tarde") === 0) {
+      const mF = Utilities.formatDate(dObj, tz, "yyyy-MM");
+      tardMes[mF] = (tardMes[mF] || 0) + 1;
+    }
+
+    if (servHor[servicio]) {
+      // Regular: al fichar entrada en un día con turno, cuenta la duración programada.
+      if (tipo === "Entrada" && servHor[servicio][dow]) {
+        const dur = horaAMin(servHor[servicio][dow][1]) - horaAMin(servHor[servicio][dow][0]);
+        if (!isNaN(dur) && dur > 0) weekWorked[wk] = (weekWorked[wk] || 0) + dur;
+      }
+    } else if (SERVICIOS_LIBRES.indexOf(servicio) !== -1) {
+      // Libre: se guarda para emparejar entrada→salida y contar la duración real.
+      const key = servicio + "|" + fi;
+      const e = extras[key] || (extras[key] = { ent: [], sal: [], wk: wk });
+      const hm = horaAMin(fmtCell(row[4]));
+      if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
+    }
+  });
+
+  Object.keys(extras).forEach(k => {
+    const e = extras[k];
+    e.ent.sort((a, b) => a - b); e.sal.sort((a, b) => a - b);
+    const n = Math.min(e.ent.length, e.sal.length);
+    for (let i = 0; i < n; i++) {
+      const dur = e.sal[i] - e.ent[i];
+      if (dur > 0) weekWorked[e.wk] = (weekWorked[e.wk] || 0) + dur;
+    }
+  });
+
+  const mes = {}; // "yyyy-MM" -> {overtime, trabajadas, tardanzas}
+  Object.keys(weekWorked).forEach(wk => {
+    const workedH = weekWorked[wk] / 60;
+    const m = weekMonth[wk];
+    const o = mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, tardanzas: 0 });
+    o.overtime   += Math.max(0, workedH - contrato);
+    o.trabajadas += workedH;
+  });
+  Object.keys(tardMes).forEach(m => {
+    (mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, tardanzas: 0 })).tardanzas += tardMes[m];
+  });
+
+  return Object.keys(mes).sort().reverse().map(m => ({
+    mes: m,
+    overtime:   Math.round(mes[m].overtime * 10) / 10,
+    trabajadas: Math.round(mes[m].trabajadas * 10) / 10,
+    tardanzas:  mes[m].tardanzas
+  }));
+}
+
 // Conjunto de nombres de servicio válidos: los reales (todos figuran en
 // HORARIOS) + los libres (Horas Extras / Suplencias). Sirve para validar el
 // parámetro `servicio` de adminServicioGlobal contra una lista conocida.
@@ -947,6 +1046,23 @@ function doGet(e) {
           motivo:    (row[10] || "").toString()
         };
       }).reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- HORAS EXTRA: por empleado y por mes (excedente sobre el contrato) ----
+  if (p.action === "adminHorasExtra") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const records = EMPLEADOS.map(e => ({
+        empleado: e,
+        contrato: horasContratoSemanal(e),
+        meses:    horasExtraDe(e)
+      }));
       return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
