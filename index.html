@@ -2797,14 +2797,21 @@
     el.innerHTML = recs.map(r => `
       <div class="hist-day">
         <div class="hist-day-label">${r.empleado} · contrato ${r.contrato} hs/sem</div>
-        ${r.meses.length ? r.meses.map(m => `
+        ${r.meses.length ? r.meses.map(m => {
+          const notas = [];
+          if (m.domingo)   notas.push(`🗓️ ${m.domingo} hs domingo`);
+          if (m.feriado)   notas.push(`🎌 ${m.feriado} hs feriado`);
+          if (m.tardanzas) notas.push(`⚠️ ${m.tardanzas} tarde (no descontadas)`);
+          const sub = `trabajó ~${m.trabajadas} hs${notas.length ? " · " + notas.join(" · ") : ""}`;
+          return `
           <div class="hist-row ${m.overtime > 0 ? "salida" : ""}">
             <div>
               <div class="hr-serv">${mesLabel(m.mes)}</div>
-              <div class="hr-hora">trabajó ~${m.trabajadas} hs${m.tardanzas ? ` · ⚠️ ${m.tardanzas} tarde (no descontadas)` : ""}</div>
+              <div class="hr-hora">${sub}</div>
             </div>
             <span class="badge ${m.overtime > 0 ? "badge-tarde" : "badge-entrada"}">${m.overtime} hs extra</span>
-          </div>`).join("")
+          </div>`;
+        }).join("")
         : `<div class="hist-empty" style="padding:8px 0;">Sin datos de fichadas.</div>`}
       </div>`).join("");
   }

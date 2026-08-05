@@ -859,6 +859,26 @@ function empleadoHorarioEfectivo(empleado, servicio, fecha) {
   return cob ? cob.titular : empleado;
 }
 
+// ---- Feriados nacionales (dd/MM/yyyy) ----
+// ⚠️ SOLO feriados nacionales (los "días no laborables" NO van acá: para la
+// empresa son día normal). Las horas fichadas en feriado o domingo cuentan
+// SIEMPRE como extra. Lista para confirmar/actualizar con Andi cada año.
+const FERIADOS = [
+  "01/01/2026", "16/02/2026", "17/02/2026", "24/03/2026", "02/04/2026",
+  "03/04/2026", "01/05/2026", "25/05/2026", "15/06/2026", "20/06/2026",
+  "09/07/2026", "17/08/2026", "12/10/2026", "20/11/2026", "08/12/2026",
+  "25/12/2026"
+];
+const FERIADOS_SET = (function () {
+  const s = {};
+  FERIADOS.forEach(f => {
+    const m = f.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (m) s[Number(m[3]) * 10000 + Number(m[2]) * 100 + Number(m[1])] = true;
+  });
+  return s;
+})();
+function esFeriado(fechaInt) { return !!FERIADOS_SET[fechaInt]; }
+
 // ---- Horas extra ----
 // Horas semanales de contrato de un empleado (jornada completa 44 / reducida 24).
 function horasContratoSemanal(empleado) {
@@ -889,10 +909,11 @@ function horasExtraDe(empleado) {
   const minInt = desde.getFullYear() * 10000 + (desde.getMonth() + 1) * 100 + desde.getDate();
 
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
-  const weekWorked = {};   // wkInt -> minutos trabajados
+  const weekWorked = {};   // wkInt -> minutos trabajados (días normales)
   const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
   const tardMes    = {};   // "yyyy-MM" -> cantidad de tardanzas
-  const extras     = {};   // "servicio|fechaInt" -> {ent:[], sal:[], wk}
+  const extras     = {};   // días normales, libres: "servicio|fi" -> {ent, sal, wk}
+  const special    = {};   // domingo/feriado, TODO servicio: "servicio|fi" -> {ent, sal, mes, tipo}
 
   data.forEach(row => {
     const fechaStr = fmtCell(row[0]);
@@ -906,11 +927,22 @@ function horasExtraDe(empleado) {
     const dow   = dObj.getDay();
     const lunes = lunesDeSemana(dObj);
     const wk    = lunes.getFullYear() * 10000 + (lunes.getMonth() + 1) * 100 + lunes.getDate();
+    const mesF  = Utilities.formatDate(dObj, tz, "yyyy-MM");
     weekMonth[wk] = Utilities.formatDate(lunes, tz, "yyyy-MM");
 
     if (tipo === "Entrada" && estado.indexOf("Tarde") === 0) {
-      const mF = Utilities.formatDate(dObj, tz, "yyyy-MM");
-      tardMes[mF] = (tardMes[mF] || 0) + 1;
+      tardMes[mesF] = (tardMes[mesF] || 0) + 1;
+    }
+
+    const hm = horaAMin(fmtCell(row[4]));
+
+    // Domingo o feriado: TODO lo trabajado ese día es extra (duración real).
+    const feriado = esFeriado(fi);
+    if (feriado || dow === 0) {
+      const key = servicio + "|" + fi;
+      const s = special[key] || (special[key] = { ent: [], sal: [], mes: mesF, tipo: feriado ? "feriado" : "domingo" });
+      if (!isNaN(hm)) (tipo === "Entrada" ? s.ent : s.sal).push(hm);
+      return;
     }
 
     if (servHor[servicio]) {
@@ -923,11 +955,11 @@ function horasExtraDe(empleado) {
       // Libre: se guarda para emparejar entrada→salida y contar la duración real.
       const key = servicio + "|" + fi;
       const e = extras[key] || (extras[key] = { ent: [], sal: [], wk: wk });
-      const hm = horaAMin(fmtCell(row[4]));
       if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
     }
   });
 
+  // Emparejar entrada→salida de los libres en días normales.
   Object.keys(extras).forEach(k => {
     const e = extras[k];
     e.ent.sort((a, b) => a - b); e.sal.sort((a, b) => a - b);
@@ -938,22 +970,43 @@ function horasExtraDe(empleado) {
     }
   });
 
-  const mes = {}; // "yyyy-MM" -> {overtime, trabajadas, tardanzas}
+  // Emparejar los de domingo/feriado (todo servicio) -> horas extra fijas por mes.
+  const specialMes = {}; // "yyyy-MM" -> { domingo, feriado } en horas
+  Object.keys(special).forEach(k => {
+    const s = special[k];
+    s.ent.sort((a, b) => a - b); s.sal.sort((a, b) => a - b);
+    const n = Math.min(s.ent.length, s.sal.length);
+    let tot = 0;
+    for (let i = 0; i < n; i++) { const dur = s.sal[i] - s.ent[i]; if (dur > 0) tot += dur; }
+    const o = specialMes[s.mes] || (specialMes[s.mes] = { domingo: 0, feriado: 0 });
+    o[s.tipo] += tot / 60;
+  });
+
+  const mes = {}; // "yyyy-MM" -> {overtime, trabajadas, domingo, feriado, tardanzas}
+  function bucket(m) { return mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, domingo: 0, feriado: 0, tardanzas: 0 }); }
+
   Object.keys(weekWorked).forEach(wk => {
     const workedH = weekWorked[wk] / 60;
-    const m = weekMonth[wk];
-    const o = mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, tardanzas: 0 });
+    const o = bucket(weekMonth[wk]);
     o.overtime   += Math.max(0, workedH - contrato);
     o.trabajadas += workedH;
   });
-  Object.keys(tardMes).forEach(m => {
-    (mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, tardanzas: 0 })).tardanzas += tardMes[m];
+  Object.keys(specialMes).forEach(m => {
+    const o = bucket(m);
+    o.domingo    += specialMes[m].domingo;
+    o.feriado    += specialMes[m].feriado;
+    o.overtime   += specialMes[m].domingo + specialMes[m].feriado;
+    o.trabajadas += specialMes[m].domingo + specialMes[m].feriado;
   });
+  Object.keys(tardMes).forEach(m => { bucket(m).tardanzas += tardMes[m]; });
 
+  const r1 = x => Math.round(x * 10) / 10;
   return Object.keys(mes).sort().reverse().map(m => ({
     mes: m,
-    overtime:   Math.round(mes[m].overtime * 10) / 10,
-    trabajadas: Math.round(mes[m].trabajadas * 10) / 10,
+    overtime:   r1(mes[m].overtime),
+    trabajadas: r1(mes[m].trabajadas),
+    domingo:    r1(mes[m].domingo),
+    feriado:    r1(mes[m].feriado),
     tardanzas:  mes[m].tardanzas
   }));
 }
