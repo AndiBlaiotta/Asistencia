@@ -39,7 +39,7 @@ const HEADERS = [
 // Hojas que NO son de empleados (no llevan fichadas): se saltean al recorrer
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
-                           "Vacaciones", "Coberturas"];
+                           "Vacaciones", "Coberturas", "Ausencias"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -69,6 +69,15 @@ const VACAS_CONFIG = {
   "Alejandro Jelvez": { alta: "01/06/2026", tomadasPrevias: 0 },
   "Milagros Acuña":   { alta: "01/07/2026", tomadasPrevias: 0 }
 };
+
+// ---- Ausencias (faltas): días/servicios que le tocaban y no fichó ----
+const AUSENCIAS_SHEET   = "Ausencias";
+const AUSENCIAS_HEADERS = ["ID", "Empleado", "Fecha", "Servicio", "Motivo", "Clasificación", "Detectada", "Clasificada"];
+// Desde cuándo se empiezan a detectar faltas (para no traer histórico viejo).
+// Formato dd/MM/yyyy. Mover si se quiere arrancar antes/después.
+const AUSENCIAS_DESDE = "05/08/2026";
+// Ventana máxima hacia atrás (días) que se revisa en cada detección.
+const AUSENCIAS_LOOKBACK_DIAS = 60;
 
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
 const PRODUCTOS = [
@@ -695,6 +704,105 @@ function saldoVacaciones(empleado) {
     disponibles: corresponden - tomados - reservados,
     alta: cfg.alta || ""
   };
+}
+
+// ---- Ausencias ----
+function getAusenciasSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(AUSENCIAS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(AUSENCIAS_SHEET);
+    sheet.appendRow(AUSENCIAS_HEADERS);
+    sheet.getRange(1, 1, 1, AUSENCIAS_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+// Detecta y registra las ausencias nuevas de un empleado: días/servicios que le
+// tocaban (según HORARIOS), ya pasaron, no fichó Entrada, y no estaba de
+// vacaciones (aceptadas o pendientes). No pisa las ya registradas. Los servicios
+// libres no cuentan (no están en HORARIOS). Idempotente.
+function detectarAusencias(empleado) {
+  const servHor = HORARIOS[empleado];
+  if (!servHor) return;
+  const tz = Session.getScriptTimeZone();
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+
+  const desdeCfg = fechaADate(AUSENCIAS_DESDE);
+  const alta     = fechaADate((VACAS_CONFIG[empleado] || {}).alta);
+  const hace     = new Date(hoy.getTime() - AUSENCIAS_LOOKBACK_DIAS * 86400000);
+  let startMs = hace.getTime();
+  if (desdeCfg) startMs = Math.max(startMs, desdeCfg.getTime());
+  if (alta)     startMs = Math.max(startMs, alta.getTime());
+  const start = new Date(startMs); start.setHours(0, 0, 0, 0);
+  const end   = new Date(hoy.getTime() - 86400000); // ayer (no cuenta hoy)
+  if (start > end) return;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Entradas fichadas por el empleado: set "servicio|fechaInt".
+  const sheet = ss.getSheetByName(empleado);
+  const entradaSet = {};
+  if (sheet && sheet.getLastRow() > 1) {
+    const vals = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues(); // Fecha,Servicio,Dir,Tipo
+    vals.forEach(r => {
+      if ((r[3] || "").toString() === "Entrada") {
+        const fi = fechaAInt(fmtCell(r[0]));
+        if (!isNaN(fi)) entradaSet[(r[1] || "") + "|" + fi] = true;
+      }
+    });
+  }
+
+  // Rangos de vacaciones (aceptadas o pendientes) del empleado.
+  const vacs = [];
+  const vsheet = getVacacionesSheet();
+  if (vsheet.getLastRow() > 1) {
+    const vv = vsheet.getRange(2, 1, vsheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
+    vv.forEach(r => {
+      const est = (r[5] || "").toString();
+      if ((r[1] || "").toString() === empleado && (est === "Aceptada" || est === "Pendiente")) {
+        vacs.push([fechaAInt(r[2]), fechaAInt(r[3])]);
+      }
+    });
+  }
+
+  // Ausencias ya registradas del empleado: set "servicio|fechaInt".
+  const asheet = getAusenciasSheet();
+  const existentes = {};
+  if (asheet.getLastRow() > 1) {
+    const aa = asheet.getRange(2, 1, asheet.getLastRow() - 1, AUSENCIAS_HEADERS.length).getValues();
+    aa.forEach(r => {
+      if ((r[1] || "").toString() === empleado) existentes[(r[3] || "") + "|" + fechaAInt(r[2])] = true;
+    });
+  }
+
+  const nuevas = [];
+  const now = Utilities.formatDate(new Date(), tz, "dd/MM/yyyy HH:mm");
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dow = d.getDay();
+    const fi  = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    let enVacas = false;
+    for (let k = 0; k < vacs.length; k++) {
+      const vd = vacs[k][0], vh = vacs[k][1];
+      if (!isNaN(vd) && !isNaN(vh) && fi >= vd && fi <= vh) { enVacas = true; break; }
+    }
+    if (enVacas) continue;
+    const fechaStr = Utilities.formatDate(d, tz, "dd/MM/yyyy");
+    Object.keys(servHor).forEach(servicio => {
+      if (!servHor[servicio][dow]) return;        // ese día no trabaja ese servicio
+      const key = servicio + "|" + fi;
+      if (entradaSet[key]) return;                 // fichó: presente
+      if (existentes[key]) return;                 // ya registrada
+      existentes[key] = true;
+      nuevas.push([Utilities.getUuid().slice(0, 8), empleado, fechaStr, servicio, "", "Sin clasificar", now, ""]);
+    });
+  }
+  if (nuevas.length) {
+    const startRow = asheet.getLastRow() + 1;
+    asheet.getRange(startRow, 1, nuevas.length, AUSENCIAS_HEADERS.length).setNumberFormat("@").setValues(nuevas);
+  }
 }
 
 function getVacacionesSheet() {
@@ -1452,6 +1560,111 @@ function doGet(e) {
         return !isNaN(d) && !isNaN(h) && !isNaN(hoy) && hoy >= d && hoy <= h;
       }).map(r => ({ servicio: r[2], titular: r[3], desde: r[5], hasta: r[6] }));
       return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ==========================================================
+  // AUSENCIAS (faltas)
+  // ==========================================================
+
+  // ---- El empleado ve sus ausencias (detecta las nuevas al pasar) ----
+  if (p.action === "misAusencias" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      detectarAusencias(p.empleado);
+      const sheet = getAusenciasSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, AUSENCIAS_HEADERS.length).getValues();
+      const records = data
+        .filter(r => (r[1] || "").toString() === p.empleado)
+        .map(r => ({ id: r[0], fecha: r[2], servicio: r[3], motivo: r[4], clasificacion: r[5] }))
+        .reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado carga/edita el motivo de una falta suya ----
+  if (p.action === "motivoAusencia" && p.empleado && p.id) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getAusenciasSheet();
+      const last = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "Falta no encontrada" });
+      const data = sheet.getRange(2, 1, last - 1, AUSENCIAS_HEADERS.length).getValues();
+      const idx = data.findIndex(r => (r[0] || "").toString() === p.id && (r[1] || "").toString() === p.empleado);
+      if (idx === -1) return jsonOut({ status: "error", message: "Falta no encontrada" });
+      sheet.getRange(idx + 2, 5).setNumberFormat("@").setValue((p.motivo || "").toString());
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: ver todas las faltas (detecta las de todos al pasar) ----
+  if (p.action === "adminAusencias") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      EMPLEADOS.forEach(e => detectarAusencias(e));
+      const sheet = getAusenciasSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, AUSENCIAS_HEADERS.length).getValues();
+      const records = data.map(r => ({
+        id: r[0], empleado: r[1], fecha: r[2], servicio: r[3], motivo: r[4], clasificacion: r[5]
+      })).reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: clasificar una falta (Justificada / Injustificada) ----
+  if (p.action === "clasificarAusencia" && p.id && p.clasificacion) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (["Justificada", "Injustificada", "Sin clasificar"].indexOf(p.clasificacion) === -1) {
+      return jsonOut({ status: "error", message: "Clasificación inválida" });
+    }
+    try {
+      const sheet = getAusenciasSheet();
+      const last = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "Falta no encontrada" });
+      const ids = sheet.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "Falta no encontrada" });
+      sheet.getRange(idx + 2, 6).setValue(p.clasificacion);
+      sheet.getRange(idx + 2, 8).setNumberFormat("@")
+        .setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"));
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: anular (borrar) una falta mal detectada ----
+  if (p.action === "anularAusencia" && p.id) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getAusenciasSheet();
+      const last = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "Falta no encontrada" });
+      const ids = sheet.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "Falta no encontrada" });
+      sheet.deleteRow(idx + 2);
+      return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }

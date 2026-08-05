@@ -514,6 +514,7 @@
 
   <!-- TAB: HISTORIAL -->
   <div id="tab-historial">
+    <div id="hist-faltas"></div>
     <button class="btn-refresh" onclick="cargarHistorial()">🔄 Actualizar historial</button>
     <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
   </div>
@@ -555,7 +556,8 @@
     <button class="btn btn-primary" onclick="openAdminComprar()" style="margin-bottom:12px;">🛒 Pedidos para comprar</button>
     <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:12px;">📦 Historial de pedidos por lugar</button>
     <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:12px;">📍 Fichadas por servicio</button>
-    <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:18px;">🏖️ Vacaciones y suplencias</button>
+    <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:12px;">🏖️ Vacaciones y suplencias</button>
+    <button class="btn btn-primary" onclick="openAdminAusencias()" style="margin-bottom:18px;">🚫 Faltas / Ausencias</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -594,6 +596,14 @@
     <div class="section-title" style="margin-top:16px;">Llegadas tarde</div>
     <button class="btn-refresh" onclick="loadAdminTardanzas(true)">🔄 Actualizar</button>
     <div id="admin-tardanzas"></div>
+  </div>
+
+  <!-- FALTAS / AUSENCIAS: detección, motivo del empleado, clasificación -->
+  <div id="admin-step-ausencias" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Faltas / Ausencias</div>
+    <button class="btn-refresh" onclick="loadAdminAusencias()">🔄 Actualizar</button>
+    <div id="admin-ausencias"></div>
   </div>
 
   <!-- VACACIONES: solicitudes, aprobación y asignación de suplentes -->
@@ -672,6 +682,18 @@
     <textarea id="modal-motivo-text" rows="3" placeholder="Escribí el motivo (obligatorio)..." oninput="onMotivoInput()"></textarea>
     <button class="btn btn-entrada" id="modal-motivo-ok" onclick="confirmarMotivo()" disabled>Registrar entrada</button>
     <button class="btn btn-cambiar" onclick="cancelarMotivo()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ==================== MODAL: MOTIVO DE AUSENCIA ==================== -->
+<div id="modal-ausencia" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-title" style="color:#dc2626;">🚫 Ausencia detectada</div>
+    <div class="modal-sub" id="modal-ausencia-sub"></div>
+    <label for="modal-ausencia-text">¿Por qué faltaste?</label>
+    <textarea id="modal-ausencia-text" rows="3" placeholder="Contanos el motivo..." oninput="onAusenciaInput()"></textarea>
+    <button class="btn btn-primary" id="modal-ausencia-ok" onclick="confirmarAusencia()" disabled>Enviar motivo</button>
+    <button class="btn btn-cambiar" onclick="cerrarAusencia()">Más tarde</button>
   </div>
 </div>
 
@@ -814,6 +836,84 @@
     }
   }
 
+  // ---------- AUSENCIAS (empleado) ----------
+  let misAusencias = [];
+  let ausenciasQueue = [];
+
+  // Trae las faltas del empleado (el server detecta las nuevas). Encola las que
+  // no tienen motivo para pedírselo con el cartel.
+  async function cargarAusencias() {
+    try {
+      const j = await fetchJson({ action: "misAusencias", empleado: currentUser, hash: currentHash });
+      misAusencias = (j.status === "ok" && j.records) ? j.records : [];
+    } catch (e) {
+      misAusencias = [];
+    }
+    renderMisFaltas();
+    ausenciasQueue = misAusencias.filter(a => !a.motivo || !a.motivo.toString().trim());
+    mostrarProximaAusencia();
+  }
+
+  function mostrarProximaAusencia() {
+    if (!ausenciasQueue.length) { cerrarAusencia(); return; }
+    const a = ausenciasQueue[0];
+    document.getElementById("modal-ausencia-sub").textContent =
+      `No fichaste el ${a.fecha} en "${a.servicio}". Si faltaste, contanos por qué. Si es un error, avisale al administrador.`;
+    const txt = document.getElementById("modal-ausencia-text");
+    txt.value = "";
+    document.getElementById("modal-ausencia-ok").disabled = true;
+    document.getElementById("modal-ausencia").style.display = "flex";
+    setTimeout(() => txt.focus(), 50);
+  }
+  function onAusenciaInput() {
+    document.getElementById("modal-ausencia-ok").disabled =
+      document.getElementById("modal-ausencia-text").value.trim().length === 0;
+  }
+  function cerrarAusencia() {
+    document.getElementById("modal-ausencia").style.display = "none";
+  }
+  async function confirmarAusencia() {
+    const a = ausenciasQueue[0];
+    const motivo = document.getElementById("modal-ausencia-text").value.trim();
+    if (!a || !motivo) return;
+    try {
+      const j = await fetchJson({ action: "motivoAusencia", empleado: currentUser, hash: currentHash, id: a.id, motivo });
+      if (j.status !== "ok") { alert(j.message || "No se pudo enviar."); return; }
+      a.motivo = motivo;            // reflejar en memoria (para el resumen)
+      ausenciasQueue.shift();
+      renderMisFaltas();
+      mostrarProximaAusencia();
+    } catch (e) {
+      alert("❌ " + e.message);
+    }
+  }
+
+  // Resumen de faltas por mes (en la pestaña Historial): total + clasificación.
+  function renderMisFaltas() {
+    const el = document.getElementById("hist-faltas");
+    if (!el) return;
+    if (!misAusencias.length) { el.innerHTML = ""; return; }
+    const meses = {};
+    misAusencias.forEach(a => {
+      const m = meses[mesKey(a.fecha)] || (meses[mesKey(a.fecha)] = { total: 0, just: 0, injust: 0, sinc: 0 });
+      m.total++;
+      if (a.clasificacion === "Justificada") m.just++;
+      else if (a.clasificacion === "Injustificada") m.injust++;
+      else m.sinc++;
+    });
+    const ord = Object.keys(meses).sort().reverse();
+    el.innerHTML = `
+      <div class="section-title">Mis faltas por mes</div>
+      ${ord.map(k => {
+        const m = meses[k];
+        return `<div class="hist-row salida">
+          <div><div class="hr-serv">${mesLabel(k)}</div>
+               <div class="hr-hora">✅ ${m.just} justificadas · ⚠️ ${m.injust} injustificadas${m.sinc ? ` · ${m.sinc} sin revisar` : ""}</div></div>
+          <span class="badge badge-salida">${m.total}</span>
+        </div>`;
+      }).join("")}`;
+  }
+
   // Tolerancia de tardanza (minutos) para las fichadas de Entrada.
   const TOLERANCIA_TARDE_MIN = 10;
 
@@ -922,6 +1022,7 @@
     getLocation();
     renderServices();
     cargarCoberturas();
+    cargarAusencias();
   }
 
   // Al abrir la app, restaurar sesión si hay una guardada.
@@ -1058,6 +1159,9 @@
     adminEmpleado = adminServicio = null;
     coberturasActivas = [];
     misVacacionesSaldo = null;
+    misAusencias = [];
+    ausenciasQueue = [];
+    cerrarAusencia();
     adminRecordsCache = { empleado: null, records: null };
     document.getElementById("screen-home").style.display  = "none";
     document.getElementById("screen-admin").style.display = "none";
@@ -1315,7 +1419,7 @@
       document.getElementById("tab-" + t).style.display = tab === t ? "block" : "none";
       document.getElementById("tbtn-" + t).classList.toggle("active", tab === t);
     });
-    if (tab === "historial")  cargarHistorial();
+    if (tab === "historial")  { renderMisFaltas(); cargarHistorial(); }
     if (tab === "materiales") renderMaterialesTab();
     if (tab === "vacaciones") cargarMisVacaciones();
   }
@@ -1711,6 +1815,7 @@
     document.getElementById("admin-step-servicioglobal").style.display = step === "servicioglobal" ? "block" : "none";
     document.getElementById("admin-step-servicioslista").style.display = step === "servicioslista" ? "block" : "none";
     document.getElementById("admin-step-vacaciones").style.display = step === "vacaciones" ? "block" : "none";
+    document.getElementById("admin-step-ausencias").style.display = step === "ausencias" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -2579,6 +2684,79 @@
     const j = await fetchJson({ action: "quitarCobertura", admin: currentUser, hash: currentHash, id });
     if (j.status !== "ok") { alert(j.message || "No se pudo quitar."); return; }
     loadAdminVacaciones();
+  }
+
+  // ---------- FALTAS / AUSENCIAS (admin) ----------
+  let adminAusenciasCache = null;
+
+  function openAdminAusencias() {
+    adminShowStep("ausencias");
+    loadAdminAusencias();
+  }
+
+  async function loadAdminAusencias() {
+    const el = document.getElementById("admin-ausencias");
+    el.innerHTML = `<div class="hist-loading">⏳ Detectando y cargando faltas...</div>`;
+    try {
+      const j = await fetchJson({ action: "adminAusencias", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      adminAusenciasCache = j.records || [];
+      renderAdminAusencias();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function ausenciaBadge(c) {
+    if (c === "Justificada")   return `<span class="badge badge-entrada">Justificada</span>`;
+    if (c === "Injustificada") return `<span class="badge badge-salida">Injustificada</span>`;
+    return `<span class="badge badge-sinasignar">Sin clasificar</span>`;
+  }
+
+  function renderAusenciaRow(r) {
+    return `<div class="mat-item" style="flex-direction:column;align-items:stretch;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div><div class="mat-nombre">${r.fecha} · ${r.servicio}</div>
+             <div class="mat-fecha">${r.motivo ? "📝 " + r.motivo : "— sin motivo del empleado —"}</div></div>
+        ${ausenciaBadge(r.clasificacion)}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+        <button class="btn-mini btn-recibido" onclick="clasificarAus('${r.id}','Justificada')">✅ Justificada</button>
+        <button class="btn-mini btn-anular" onclick="clasificarAus('${r.id}','Injustificada')">⚠️ Injustificada</button>
+        <button class="btn-mini" style="background:#f1f5f9;color:#4b5563;border:1.5px solid var(--border);" onclick="anularAus('${r.id}')">🗑️ Anular</button>
+      </div>
+    </div>`;
+  }
+
+  function renderAdminAusencias() {
+    const el = document.getElementById("admin-ausencias");
+    const recs = adminAusenciasCache || [];
+    if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay faltas registradas. 🎉</div>`; return; }
+    const grupos = {};
+    recs.forEach(r => { (grupos[r.empleado] = grupos[r.empleado] || []).push(r); });
+    const emps = Object.keys(grupos).sort((a, b) => a.localeCompare(b));
+    el.innerHTML = emps.map(emp => {
+      const rs = grupos[emp].slice().sort((a, b) => fechaKey(b.fecha) - fechaKey(a.fecha));
+      const sinClas = rs.filter(r => r.clasificacion !== "Justificada" && r.clasificacion !== "Injustificada").length;
+      return `
+      <div class="hist-day">
+        <div class="hist-day-label">${emp} · ${rs.length} ${rs.length === 1 ? "falta" : "faltas"}${sinClas ? ` · ${sinClas} sin clasificar` : ""}</div>
+        ${rs.map(renderAusenciaRow).join("")}
+      </div>`;
+    }).join("");
+  }
+
+  async function clasificarAus(id, clasificacion) {
+    const j = await fetchJson({ action: "clasificarAusencia", admin: currentUser, hash: currentHash, id, clasificacion });
+    if (j.status !== "ok") { alert(j.message || "No se pudo clasificar."); return; }
+    loadAdminAusencias();
+  }
+
+  async function anularAus(id) {
+    if (!confirm("¿Anular esta falta? Usalo si se detectó por error (ej. un feriado).")) return;
+    const j = await fetchJson({ action: "anularAusencia", admin: currentUser, hash: currentHash, id });
+    if (j.status !== "ok") { alert(j.message || "No se pudo anular."); return; }
+    loadAdminAusencias();
   }
 
   // ---------- ARRANQUE ----------
