@@ -46,7 +46,7 @@ const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth"
 // "Coberturas": qué servicio cubre qué suplente durante el período de una
 // licencia aceptada (le habilita fichar ese servicio solo en esas fechas).
 const VACAS_SHEET   = "Vacaciones";
-const VACAS_HEADERS = ["ID", "Empleado", "Desde", "Hasta", "Días", "Estado", "Solicitado", "Resuelto"];
+const VACAS_HEADERS = ["ID", "Empleado", "Desde", "Hasta", "Días", "Estado", "Solicitado", "Resuelto", "Tipo"];
 const COBERTURAS_SHEET   = "Coberturas";
 const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente", "Desde", "Hasta", "Asignado"];
 
@@ -690,6 +690,8 @@ function saldoVacaciones(empleado) {
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
     data.forEach(r => {
       if ((r[1] || "").toString() !== empleado) return;
+      // Las licencias médicas NO consumen días de vacaciones (legacy sin tipo = Vacaciones).
+      if ((r[8] || "Vacaciones").toString() !== "Vacaciones") return;
       const d = parseInt(r[4], 10) || 0;
       const estado = (r[5] || "").toString();
       if (estado === "Aceptada") aprobadas += d;
@@ -1549,16 +1551,20 @@ function doGet(e) {
     if (hi < di) return jsonOut({ status: "error", message: "La fecha 'hasta' es anterior a 'desde'" });
     const dias = diasEntre(desde, hasta);
     if (typeof dias !== "number" || dias < 1) return jsonOut({ status: "error", message: "Fechas inválidas" });
-    // Validar contra el saldo y la regla de 7 (con la excepción de <7 disponibles).
-    const saldo = saldoVacaciones(p.empleado);
-    if (saldo.disponibles <= 0) {
-      return jsonOut({ status: "error", message: "No tenés días de vacaciones disponibles." });
-    }
-    if (dias > saldo.disponibles) {
-      return jsonOut({ status: "error", message: `No te alcanzan los días: pediste ${dias} y te quedan ${saldo.disponibles}.` });
-    }
-    if (saldo.disponibles >= 7 && dias % 7 !== 0) {
-      return jsonOut({ status: "error", message: "Tenés que pedir 7 días o múltiplos de 7 (7, 14, 21...)." });
+    const tipo = (p.tipo === "Licencia médica") ? "Licencia médica" : "Vacaciones";
+    // La regla de saldo/7 solo aplica a VACACIONES. La licencia médica no
+    // consume días ni tiene tope (es por certificado, no por cupo).
+    if (tipo === "Vacaciones") {
+      const saldo = saldoVacaciones(p.empleado);
+      if (saldo.disponibles <= 0) {
+        return jsonOut({ status: "error", message: "No tenés días de vacaciones disponibles." });
+      }
+      if (dias > saldo.disponibles) {
+        return jsonOut({ status: "error", message: `No te alcanzan los días: pediste ${dias} y te quedan ${saldo.disponibles}.` });
+      }
+      if (saldo.disponibles >= 7 && dias % 7 !== 0) {
+        return jsonOut({ status: "error", message: "Tenés que pedir 7 días o múltiplos de 7 (7, 14, 21...)." });
+      }
     }
     try {
       const sheet = getVacacionesSheet();
@@ -1566,7 +1572,7 @@ function doGet(e) {
       const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
       const row   = sheet.getLastRow() + 1;
       sheet.getRange(row, 1, 1, VACAS_HEADERS.length).setNumberFormat("@")
-        .setValues([[id, p.empleado, desde, hasta, String(dias), "Pendiente", now, ""]]);
+        .setValues([[id, p.empleado, desde, hasta, String(dias), "Pendiente", now, "", tipo]]);
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
@@ -1585,7 +1591,7 @@ function doGet(e) {
       const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
       const records = data
         .filter(r => (r[1] || "").toString() === p.empleado)
-        .map(r => ({ id: r[0], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6] }))
+        .map(r => ({ id: r[0], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6], tipo: (r[8] || "Vacaciones").toString() }))
         .reverse();
       return jsonOut({ status: "ok", records, saldo });
     } catch (err) {
@@ -1603,7 +1609,8 @@ function doGet(e) {
       if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
       const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, VACAS_HEADERS.length).getValues();
       const records = data.map(r => ({
-        id: r[0], empleado: r[1], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6]
+        id: r[0], empleado: r[1], desde: r[2], hasta: r[3], dias: r[4], estado: r[5], solicitado: r[6],
+        tipo: (r[8] || "Vacaciones").toString()
       })).reverse();
       return jsonOut({ status: "ok", records });
     } catch (err) {

@@ -531,6 +531,16 @@
     <button class="btn btn-primary" id="vac-enviar" onclick="enviarVacaciones()" disabled>Enviar solicitud</button>
     <div id="vac-msg" class="success" style="margin-top:10px;"></div>
 
+    <div class="section-title" style="margin-top:24px;">🩺 Licencia médica</div>
+    <div style="font-size:12px;color:var(--gray);font-weight:600;margin-bottom:4px;">Cargá el plazo de tu licencia (no descuenta días de vacaciones).</div>
+    <label for="lic-desde">Desde</label>
+    <input type="date" id="lic-desde" onchange="onLicFechas()">
+    <label for="lic-hasta">Hasta</label>
+    <input type="date" id="lic-hasta" onchange="onLicFechas()">
+    <div id="lic-dias" style="font-size:13px;font-weight:700;color:var(--cyan-dark);margin-top:10px;text-align:center;"></div>
+    <button class="btn btn-primary" id="lic-enviar" onclick="cargarLicencia()" disabled>Cargar licencia</button>
+    <div id="lic-msg" class="success" style="margin-top:10px;"></div>
+
     <div class="section-title" style="margin-top:24px;">Mis solicitudes</div>
     <div id="vac-lista"><div class="hist-empty">Cargando...</div></div>
   </div>
@@ -618,7 +628,7 @@
   <!-- VACACIONES: solicitudes, aprobación y asignación de suplentes -->
   <div id="admin-step-vacaciones" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
-    <div class="section-title" style="margin-top:16px;">Solicitudes de vacaciones</div>
+    <div class="section-title" style="margin-top:16px;">Vacaciones y licencias médicas</div>
     <button class="btn-refresh" onclick="loadAdminVacaciones(true)">🔄 Actualizar</button>
     <div id="admin-vacaciones"></div>
   </div>
@@ -1501,6 +1511,54 @@
     }
   }
 
+  // ---------- LICENCIA MÉDICA (empleado) ----------
+  // Mismo backend que vacaciones (solicitarVacaciones) con tipo="Licencia médica":
+  // no descuenta días ni tiene regla de 7, solo el plazo.
+  function onLicFechas() {
+    const d = document.getElementById("lic-desde").value;
+    const h = document.getElementById("lic-hasta").value;
+    const el = document.getElementById("lic-dias");
+    const btn = document.getElementById("lic-enviar");
+    if (!(d && h)) { el.textContent = ""; el.style.color = ""; btn.disabled = true; return; }
+    if (Date.parse(h) < Date.parse(d)) {
+      el.style.color = "#dc2626"; el.textContent = "⚠️ 'Hasta' no puede ser antes que 'Desde'"; btn.disabled = true; return;
+    }
+    const dias = Math.round((Date.parse(h) - Date.parse(d)) / 86400000) + 1;
+    el.style.color = "var(--cyan-dark)";
+    el.textContent = `${dias} ${dias === 1 ? "día" : "días"} de licencia`;
+    btn.disabled = false;
+  }
+
+  async function cargarLicencia() {
+    const desdeIso = document.getElementById("lic-desde").value;
+    const hastaIso = document.getElementById("lic-hasta").value;
+    const msg = document.getElementById("lic-msg");
+    if (!desdeIso || !hastaIso) { msg.className = "error"; msg.textContent = "Elegí las dos fechas."; return; }
+    if (Date.parse(hastaIso) < Date.parse(desdeIso)) {
+      msg.className = "error"; msg.textContent = "La fecha 'hasta' es anterior a 'desde'."; return;
+    }
+    const btn = document.getElementById("lic-enviar");
+    btn.disabled = true;
+    msg.className = "success"; msg.textContent = "Enviando...";
+    try {
+      const j = await fetchJson({
+        action: "solicitarVacaciones", empleado: currentUser, hash: currentHash,
+        desde: isoToDMY(desdeIso), hasta: isoToDMY(hastaIso), tipo: "Licencia médica"
+      });
+      if (j.status !== "ok") {
+        msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo cargar.");
+        btn.disabled = false; return;
+      }
+      msg.className = "success"; msg.textContent = "✅ Licencia cargada.";
+      document.getElementById("lic-desde").value = "";
+      document.getElementById("lic-hasta").value = "";
+      onLicFechas();
+      cargarMisVacaciones();
+    } catch (e) {
+      msg.className = "error"; msg.textContent = "❌ " + e.message; btn.disabled = false;
+    }
+  }
+
   // Badge de estado de una solicitud (compartido empleado/admin).
   function vacEstadoBadge(estado) {
     if (estado === "Aceptada")  return `<span class="badge badge-entrada">✅ Aceptada</span>`;
@@ -1548,8 +1606,8 @@
       el.innerHTML = recs.map(r => `
         <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
           <div>
-            <div class="hr-serv">${r.desde} → ${r.hasta}</div>
-            <div class="hr-hora">${r.dias} ${r.dias == 1 ? "día" : "días"} · pedido ${r.solicitado}</div>
+            <div class="hr-serv">${r.tipo === "Licencia médica" ? "🩺 Licencia médica" : "🏖️ Vacaciones"}</div>
+            <div class="hr-hora">${r.desde} → ${r.hasta} · ${r.dias} ${r.dias == 1 ? "día" : "días"}</div>
           </div>
           ${vacEstadoBadge(r.estado)}
         </div>`).join("");
@@ -2634,7 +2692,7 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div>
               <div class="s-nombre">${v.empleado}</div>
-              <div class="s-dir">${v.desde} → ${v.hasta} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
+              <div class="s-dir">${v.tipo === "Licencia médica" ? "🩺 Licencia médica" : "🏖️ Vacaciones"} · ${v.desde} → ${v.hasta} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
             </div>
             ${vacEstadoBadge(v.estado)}
           </div>
