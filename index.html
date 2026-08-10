@@ -2000,21 +2000,44 @@
   }
 
   // PASO 2: servicios del empleado elegido.
-  function adminSelectEmpleado(i) {
+  // Lista de servicios que se muestra para el empleado elegido en el admin:
+  // los propios (+ Horas Extras/Suplencias) + los que está CUBRIENDO como
+  // suplente (coberturas). adminSelectServicio usa esta misma lista por índice.
+  let adminServiciosActual = [];
+
+  async function adminSelectEmpleado(i) {
     adminEmpleado = Object.keys(SERVICIOS)[i];
     document.getElementById("admin-sel-emp").textContent = adminEmpleado;
-    const servicios = serviciosDe(adminEmpleado);
-    document.getElementById("admin-serv-list").innerHTML = servicios.map((s, idx) => `
-      <button class="service-card" onclick="adminSelectServicio(${idx})">
+    const listEl = document.getElementById("admin-serv-list");
+    adminServiciosActual = serviciosDe(adminEmpleado);
+    listEl.innerHTML = `<div class="hist-loading">⏳ Cargando servicios...</div>`;
+    adminShowStep("servicios");
+
+    // Coberturas donde este empleado es suplente (servicios que está cubriendo).
+    let cubiertos = [];
+    try {
+      const j = await fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash });
+      if (j.status === "ok" && j.records) {
+        cubiertos = j.records.filter(c => c.suplente === adminEmpleado).map(c => {
+          const s = (SERVICIOS[c.titular] || []).find(x => x.nombre === c.servicio);
+          return { nombre: c.servicio, dir: s ? s.dir : "", horario: s ? s.horario : null,
+                   cobertura: true, titular: c.titular, desde: c.desde, hasta: c.hasta };
+        });
+      }
+    } catch (e) { /* si falla, se muestran solo los propios */ }
+
+    adminServiciosActual = [...serviciosDe(adminEmpleado), ...cubiertos];
+    listEl.innerHTML = adminServiciosActual.map((s, idx) => `
+      <button class="service-card" onclick="adminSelectServicio(${idx})"${s.cobertura ? ' style="border-left-color:#0071A8;"' : ""}>
         <div>
           <div class="s-nombre">${s.nombre}</div>
-          <div class="s-dir">${s.custom ? "✍️ Dirección variable" : s.dir}</div>
-          ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
+          <div class="s-dir">${s.cobertura ? `🔁 Cubre a ${s.titular} · ${s.desde}→${s.hasta}`
+                              : (s.custom ? "✍️ Dirección variable" : s.dir)}</div>
+          ${s.horario && !s.cobertura ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
         </div>
         <span class="s-arrow">›</span>
       </button>
     `).join("");
-    adminShowStep("servicios");
   }
 
   function adminBackEmpleados() { renderAdminEmpleados(); }
@@ -2037,13 +2060,14 @@
 
   // PASO 3: registros + materiales del servicio elegido.
   function adminSelectServicio(idx) {
-    const servicios = serviciosDe(adminEmpleado);
-    adminServicio = servicios[idx];
+    adminServicio = adminServiciosActual[idx];
     document.getElementById("admin-sel-emp2").textContent = adminEmpleado;
-    document.getElementById("admin-sel-serv").textContent = adminServicio.nombre;
+    document.getElementById("admin-sel-serv").textContent =
+      adminServicio.nombre + (adminServicio.cobertura ? ` · cubre a ${adminServicio.titular}` : "");
 
-    // "Horas Extras" no tiene materiales: ocultar esa pestaña.
-    document.getElementById("admin-tbtn-materiales").style.display = adminServicio.custom ? "none" : "block";
+    // "Horas Extras"/"Suplencias" y las coberturas no tienen materiales propios acá.
+    document.getElementById("admin-tbtn-materiales").style.display =
+      (adminServicio.custom || adminServicio.cobertura) ? "none" : "block";
 
     adminShowStep("registros");
     adminSwitchView("fichadas");
