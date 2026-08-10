@@ -886,6 +886,27 @@ function esFeriado(fechaInt) { return !!FERIADOS_SET[fechaInt]; }
 function horasContratoSemanal(empleado) {
   return empleado === "Milagros Acuña" ? 24 : 44;
 }
+
+// Horas ASIGNADAS por semana a un empleado (suma de la duración de todos sus
+// turnos en HORARIOS), con el desglose por servicio. No incluye coberturas
+// temporales ni Horas Extras/Suplencias (esos no tienen horario fijo).
+function horasAsignadasDe(empleado) {
+  const servHor = HORARIOS[empleado] || {};
+  const servicios = [];
+  let total = 0;
+  Object.keys(servHor).forEach(serv => {
+    let min = 0, dias = 0;
+    Object.keys(servHor[serv]).forEach(dow => {
+      const r = servHor[serv][dow];
+      const dur = horaAMin(r[1]) - horaAMin(r[0]);
+      if (!isNaN(dur) && dur > 0) { min += dur; dias++; }
+    });
+    total += min;
+    servicios.push({ nombre: serv, horas: Math.round(min / 60 * 10) / 10, dias: dias });
+  });
+  servicios.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  return { total: Math.round(total / 60 * 10) / 10, servicios: servicios };
+}
 // Lunes (00:00) de la semana de una fecha (semana de lunes a domingo).
 function lunesDeSemana(date) {
   const d = new Date(date.getTime());
@@ -1101,6 +1122,22 @@ function doGet(e) {
           motivo:    (row[10] || "").toString()
         };
       }).reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- HORAS ASIGNADAS: horas semanales cargadas por empleado (por servicio) ----
+  if (p.action === "adminHorasAsignadas") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const records = EMPLEADOS.map(e => {
+        const a = horasAsignadasDe(e);
+        return { empleado: e, contrato: horasContratoSemanal(e), total: a.total, servicios: a.servicios };
+      });
       return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });

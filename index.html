@@ -575,6 +575,7 @@
     <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:12px;">📍 Fichadas por servicio</button>
     <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:12px;">🏖️ Vacaciones y suplencias</button>
     <button class="btn btn-primary" onclick="openAdminAusencias()" style="margin-bottom:12px;">🚫 Faltas / Ausencias</button>
+    <button class="btn btn-primary" onclick="openAdminHorasAsignadas()" style="margin-bottom:12px;">🕐 Horas asignadas</button>
     <button class="btn btn-primary" onclick="openAdminHorasExtra()" style="margin-bottom:12px;">⏱️ Horas extra</button>
     <button class="btn btn-primary" onclick="openAdminCargarFichada()" style="margin-bottom:18px;">✍️ Cargar fichada</button>
 
@@ -640,6 +641,14 @@
     </div>
     <button class="btn btn-primary" onclick="cfSubmit()">Cargar fichada</button>
     <div id="cf-msg" class="success" style="margin-top:10px;"></div>
+  </div>
+
+  <!-- HORAS ASIGNADAS: horas semanales cargadas por empleado -->
+  <div id="admin-step-horasasignadas" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Horas asignadas por empleado</div>
+    <button class="btn-refresh" onclick="loadAdminHorasAsignadas()">🔄 Actualizar</button>
+    <div id="admin-horas-asignadas"></div>
   </div>
 
   <!-- HORAS EXTRA: conteo por empleado y por mes -->
@@ -1938,6 +1947,7 @@
     document.getElementById("admin-step-ausencias").style.display = step === "ausencias" ? "block" : "none";
     document.getElementById("admin-step-horasextra").style.display = step === "horasextra" ? "block" : "none";
     document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
+    document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -3067,6 +3077,58 @@
     } catch (e) {
       msg.className = "error"; msg.textContent = "❌ " + e.message;
     }
+  }
+
+  // ---------- HORAS ASIGNADAS (admin) ----------
+  let adminHorasAsignadasCache = null;
+
+  function openAdminHorasAsignadas() {
+    adminShowStep("horasasignadas");
+    loadAdminHorasAsignadas();
+  }
+
+  async function loadAdminHorasAsignadas() {
+    const el = document.getElementById("admin-horas-asignadas");
+    el.innerHTML = `<div class="hist-loading">⏳ Calculando horas asignadas...</div>`;
+    try {
+      const j = await fetchJson({ action: "adminHorasAsignadas", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      adminHorasAsignadasCache = j.records || [];
+      renderAdminHorasAsignadas();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function renderAdminHorasAsignadas() {
+    const el = document.getElementById("admin-horas-asignadas");
+    const recs = adminHorasAsignadasCache || [];
+    if (!recs.length) { el.innerHTML = `<div class="hist-empty">Sin datos.</div>`; return; }
+    el.innerHTML = recs.map(r => {
+      const dif = Math.round((r.total - r.contrato) * 10) / 10;
+      const nota = dif < 0 ? `faltan ${Math.abs(dif)} para las ${r.contrato}`
+                 : dif > 0 ? `${dif} por encima de las ${r.contrato}`
+                 : `coincide con el contrato (${r.contrato})`;
+      const badgeClass = dif < 0 ? "badge-tarde" : "badge-entrada";
+      return `
+      <div class="hist-day">
+        <div class="hist-day-label">${r.empleado} · contrato ${r.contrato} hs/sem</div>
+        ${r.servicios.length ? r.servicios.map(s => `
+          <div class="hist-row">
+            <div>
+              <div class="hr-serv">${s.nombre}</div>
+              <div class="hr-hora">${s.dias} ${s.dias === 1 ? "día" : "días"}/sem</div>
+            </div>
+            <span class="badge badge-sinasignar">${s.horas} hs</span>
+          </div>`).join("")
+        : `<div class="hist-empty" style="padding:8px 0;">Sin servicios con horario cargado.</div>`}
+        <div class="hist-row" style="background:var(--cyan-light);margin-top:2px;">
+          <div><div class="hr-serv">Total asignado</div>
+               <div class="hr-hora">${nota}</div></div>
+          <span class="badge ${badgeClass}">${r.total} hs/sem</span>
+        </div>
+      </div>`;
+    }).join("");
   }
 
   // ---------- ARRANQUE ----------
