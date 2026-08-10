@@ -1167,6 +1167,56 @@ function doGet(e) {
     }
   }
 
+  // ---- ADMIN: cargar una fichada manualmente para un empleado ----
+  // Corrección administrativa (empleado sin señal, olvido, etc.). No aplica las
+  // validaciones de secuencia/horario: el admin carga lo que necesita. Se marca
+  // como carga manual (sin GPS). Solo admins.
+  if (p.action === "adminFichar" && p.empleado) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (!esEmpleado(p.empleado)) {
+      return jsonOut({ status: "error", message: "Empleado inválido" });
+    }
+    if (p.tipo !== "Entrada" && p.tipo !== "Salida") {
+      return jsonOut({ status: "error", message: "Tipo inválido" });
+    }
+    const servicio = (p.servicio || "").toString();
+    const fecha    = (p.fecha || "").toString();
+    const hora     = (p.hora || "").toString();
+    if (!servicio || !fecha || !hora) {
+      return jsonOut({ status: "error", message: "Faltan datos (servicio, fecha u hora)" });
+    }
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      let sheet = ss.getSheetByName(p.empleado);
+      if (!sheet) {
+        sheet = ss.insertSheet(p.empleado);
+        const hr = sheet.getRange(1, 1, 1, HEADERS.length);
+        sheet.appendRow(HEADERS);
+        hr.setBackground("#4f46e5").setFontColor("white").setFontWeight("bold").setFontSize(11);
+        sheet.setFrozenRows(1);
+      }
+      const row = sheet.getLastRow() + 1;
+      sheet.getRange(row, 1).setNumberFormat("@").setValue(fecha);
+      sheet.getRange(row, 2).setValue(servicio);
+      sheet.getRange(row, 3).setValue((p.direccion || "").toString());
+      sheet.getRange(row, 4).setValue(p.tipo);
+      sheet.getRange(row, 5).setNumberFormat("@").setValue(hora);
+      sheet.getRange(row, 6).setValue("No disponible");
+      sheet.getRange(row, 7).setValue("No disponible");
+      sheet.getRange(row, 8).setValue("No disponible");
+      sheet.getRange(row, 9).setValue("Carga manual (admin)");
+      sheet.getRange(row, 10).setValue((p.estado || "").toString());
+      sheet.getRange(row, 11).setNumberFormat("@").setValue("");
+      sheet.getRange(row, 1, 1, HEADERS.length)
+        .setBackground(p.tipo === "Entrada" ? "#f0fdf4" : "#fef2f2");
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- ANULAR una fichada: el admin borra una entrada/salida de un empleado.
   // Verifica fecha/hora/tipo de la fila antes de borrar, para no eliminar otra
   // si la vista del admin quedó desactualizada. Solo admins.

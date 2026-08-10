@@ -676,6 +676,26 @@
 
     <!-- Vista: Fichadas -->
     <div id="admin-view-fichadas">
+      <details id="af-box" style="margin-bottom:14px;border:1.5px solid var(--cyan-mid);border-radius:12px;padding:10px 14px;background:var(--cyan-light);">
+        <summary style="cursor:pointer;font-weight:700;color:var(--cyan-dark);font-size:13px;">➕ Cargar fichada manualmente</summary>
+        <div style="margin-top:10px;">
+          <label for="af-tipo">Tipo</label>
+          <select id="af-tipo">
+            <option value="Entrada">Entrada</option>
+            <option value="Salida">Salida</option>
+          </select>
+          <label for="af-fecha">Fecha</label>
+          <input type="date" id="af-fecha">
+          <label for="af-hora">Hora</label>
+          <input type="time" id="af-hora">
+          <div id="af-dir-wrap" style="display:none;">
+            <label for="af-dir">Dirección</label>
+            <input type="text" id="af-dir" placeholder="Dirección del trabajo" autocomplete="off">
+          </div>
+          <button class="btn btn-primary" onclick="adminCargarFichada()">Cargar fichada</button>
+          <div id="af-msg" class="success" style="margin-top:8px;"></div>
+        </div>
+      </details>
       <div id="admin-registros"></div>
     </div>
 
@@ -2069,8 +2089,49 @@
     document.getElementById("admin-tbtn-materiales").style.display =
       (adminServicio.custom || adminServicio.cobertura) ? "none" : "block";
 
+    prepAdminFichar();
     adminShowStep("registros");
     adminSwitchView("fichadas");
+  }
+
+  // Prepara el formulario de carga manual de fichada (colapsado, fecha hoy, y
+  // el campo Dirección solo para servicios de dirección variable).
+  function prepAdminFichar() {
+    const box = document.getElementById("af-box");
+    if (box) box.open = false;
+    const wrap = document.getElementById("af-dir-wrap");
+    if (wrap) wrap.style.display = (adminServicio && adminServicio.custom) ? "block" : "none";
+    const f = document.getElementById("af-fecha");
+    if (f) f.value = new Date().toISOString().slice(0, 10);
+    const dir = document.getElementById("af-dir"); if (dir) dir.value = "";
+    const msg = document.getElementById("af-msg"); if (msg) msg.textContent = "";
+  }
+
+  // Carga una fichada manualmente (admin) para el empleado+servicio actual.
+  async function adminCargarFichada() {
+    const tipo     = document.getElementById("af-tipo").value;
+    const fechaIso = document.getElementById("af-fecha").value;
+    const hora     = document.getElementById("af-hora").value; // "HH:MM"
+    const msg      = document.getElementById("af-msg");
+    if (!fechaIso || !hora) { msg.className = "error"; msg.textContent = "Completá fecha y hora."; return; }
+    const direccion = adminServicio.custom
+      ? document.getElementById("af-dir").value.trim()
+      : (adminServicio.dir || "");
+    if (adminServicio.custom && !direccion) { msg.className = "error"; msg.textContent = "Poné la dirección."; return; }
+    msg.className = "success"; msg.textContent = "Guardando...";
+    try {
+      const j = await fetchJson({
+        action: "adminFichar", admin: currentUser, hash: currentHash,
+        empleado: adminEmpleado, servicio: adminServicio.nombre, tipo,
+        fecha: isoToDMY(fechaIso), hora, direccion, estado: ""
+      });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo cargar."); return; }
+      msg.className = "success"; msg.textContent = `✅ ${tipo} cargada.`;
+      adminRecordsCache = { empleado: null, records: null }; // invalidar y recargar
+      adminLoadFichadas();
+    } catch (e) {
+      msg.className = "error"; msg.textContent = "❌ " + e.message;
+    }
   }
 
   // Alterna entre Fichadas y Materiales dentro de la pantalla del servicio.
