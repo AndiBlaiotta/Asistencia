@@ -568,7 +568,8 @@
     <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:12px;">📍 Fichadas por servicio</button>
     <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:12px;">🏖️ Vacaciones y suplencias</button>
     <button class="btn btn-primary" onclick="openAdminAusencias()" style="margin-bottom:12px;">🚫 Faltas / Ausencias</button>
-    <button class="btn btn-primary" onclick="openAdminHorasExtra()" style="margin-bottom:18px;">⏱️ Horas extra</button>
+    <button class="btn btn-primary" onclick="openAdminHorasExtra()" style="margin-bottom:12px;">⏱️ Horas extra</button>
+    <button class="btn btn-primary" onclick="openAdminCargarFichada()" style="margin-bottom:18px;">✍️ Cargar fichada</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -607,6 +608,31 @@
     <div class="section-title" style="margin-top:16px;">Llegadas tarde</div>
     <button class="btn-refresh" onclick="loadAdminTardanzas(true)">🔄 Actualizar</button>
     <div id="admin-tardanzas"></div>
+  </div>
+
+  <!-- CARGAR FICHADA: acceso directo (elige empleado + servicio, incl. coberturas) -->
+  <div id="admin-step-cargarfichada" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Cargar fichada manual</div>
+    <label for="cf-emp">Empleado</label>
+    <select id="cf-emp" onchange="cfEmpChange()"></select>
+    <label for="cf-serv">Servicio</label>
+    <select id="cf-serv" onchange="cfServChange()"></select>
+    <label for="cf-tipo">Tipo</label>
+    <select id="cf-tipo">
+      <option value="Entrada">Entrada</option>
+      <option value="Salida">Salida</option>
+    </select>
+    <label for="cf-fecha">Fecha</label>
+    <input type="date" id="cf-fecha">
+    <label for="cf-hora">Hora</label>
+    <input type="time" id="cf-hora">
+    <div id="cf-dir-wrap" style="display:none;">
+      <label for="cf-dir">Dirección</label>
+      <input type="text" id="cf-dir" placeholder="Dirección del trabajo" autocomplete="off">
+    </div>
+    <button class="btn btn-primary" onclick="cfSubmit()">Cargar fichada</button>
+    <div id="cf-msg" class="success" style="margin-top:10px;"></div>
   </div>
 
   <!-- HORAS EXTRA: conteo por empleado y por mes -->
@@ -1904,6 +1930,7 @@
     document.getElementById("admin-step-vacaciones").style.display = step === "vacaciones" ? "block" : "none";
     document.getElementById("admin-step-ausencias").style.display = step === "ausencias" ? "block" : "none";
     document.getElementById("admin-step-horasextra").style.display = step === "horasextra" ? "block" : "none";
+    document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -2957,6 +2984,82 @@
         }).join("")
         : `<div class="hist-empty" style="padding:8px 0;">Sin datos de fichadas.</div>`}
       </div>`).join("");
+  }
+
+  // ---------- CARGAR FICHADA (acceso directo, admin) ----------
+  let cfServicios = []; // servicios elegibles del empleado: {nombre, dir, custom, titular?}
+
+  function openAdminCargarFichada() {
+    adminShowStep("cargarfichada");
+    document.getElementById("cf-emp").innerHTML =
+      `<option value="">-- Elegí empleado --</option>` +
+      Object.keys(SERVICIOS).map(e => `<option value="${e}">${e}</option>`).join("");
+    document.getElementById("cf-serv").innerHTML = `<option value="">-- Elegí empleado primero --</option>`;
+    document.getElementById("cf-fecha").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("cf-hora").value = "";
+    document.getElementById("cf-dir-wrap").style.display = "none";
+    document.getElementById("cf-msg").textContent = "";
+    cfServicios = [];
+  }
+
+  // Al elegir empleado: arma la lista de servicios (propios + Horas Extras/
+  // Suplencias + los que está cubriendo por licencia/vacaciones de otro).
+  async function cfEmpChange() {
+    const emp = document.getElementById("cf-emp").value;
+    const servSel = document.getElementById("cf-serv");
+    document.getElementById("cf-dir-wrap").style.display = "none";
+    document.getElementById("cf-msg").textContent = "";
+    if (!emp) { servSel.innerHTML = `<option value="">-- Elegí empleado primero --</option>`; cfServicios = []; return; }
+    servSel.innerHTML = `<option value="">⏳ Cargando servicios...</option>`;
+    cfServicios = [
+      ...(SERVICIOS[emp] || []).map(s => ({ nombre: s.nombre, dir: s.dir, custom: false })),
+      { nombre: "Horas Extras", dir: "", custom: true },
+      { nombre: "Suplencias",   dir: "", custom: true }
+    ];
+    try {
+      const j = await fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash });
+      if (j.status === "ok" && j.records) {
+        j.records.filter(c => c.suplente === emp).forEach(c => {
+          const s = (SERVICIOS[c.titular] || []).find(x => x.nombre === c.servicio);
+          cfServicios.push({ nombre: c.servicio, dir: s ? s.dir : "", custom: false, titular: c.titular });
+        });
+      }
+    } catch (e) { /* si falla, quedan solo los propios */ }
+    servSel.innerHTML = `<option value="">-- Elegí servicio --</option>` +
+      cfServicios.map((s, i) => `<option value="${i}">${s.nombre}${s.titular ? ` (cubriendo a ${s.titular})` : ""}</option>`).join("");
+  }
+
+  function cfServChange() {
+    const idx = document.getElementById("cf-serv").value;
+    const s = cfServicios[idx];
+    document.getElementById("cf-dir-wrap").style.display = (s && s.custom) ? "block" : "none";
+  }
+
+  async function cfSubmit() {
+    const emp = document.getElementById("cf-emp").value;
+    const idx = document.getElementById("cf-serv").value;
+    const msg = document.getElementById("cf-msg");
+    if (!emp || idx === "") { msg.className = "error"; msg.textContent = "Elegí empleado y servicio."; return; }
+    const s = cfServicios[idx];
+    const tipo = document.getElementById("cf-tipo").value;
+    const fechaIso = document.getElementById("cf-fecha").value;
+    const hora = document.getElementById("cf-hora").value;
+    if (!fechaIso || !hora) { msg.className = "error"; msg.textContent = "Completá fecha y hora."; return; }
+    const direccion = s.custom ? document.getElementById("cf-dir").value.trim() : (s.dir || "");
+    if (s.custom && !direccion) { msg.className = "error"; msg.textContent = "Poné la dirección."; return; }
+    msg.className = "success"; msg.textContent = "Guardando...";
+    try {
+      const j = await fetchJson({
+        action: "adminFichar", admin: currentUser, hash: currentHash,
+        empleado: emp, servicio: s.nombre, tipo, fecha: isoToDMY(fechaIso), hora, direccion, estado: ""
+      });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo cargar."); return; }
+      msg.className = "success"; msg.textContent = `✅ ${tipo} cargada para ${emp} en "${s.nombre}".`;
+      document.getElementById("cf-hora").value = "";
+      if (s.custom) document.getElementById("cf-dir").value = "";
+    } catch (e) {
+      msg.className = "error"; msg.textContent = "❌ " + e.message;
+    }
   }
 
   // ---------- ARRANQUE ----------
