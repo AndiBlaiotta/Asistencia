@@ -570,9 +570,7 @@
   <div id="admin-step-empleados">
     <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:12px;">📅 Ver todos los ingresos por día</button>
     <button class="btn btn-primary" onclick="openAdminTardanzas()" style="margin-bottom:12px;">⏰ Llegadas tarde</button>
-    <button class="btn btn-primary" onclick="openAdminComprar()" style="margin-bottom:12px;">🛒 Pedidos para comprar</button>
-    <button class="btn btn-primary" onclick="openAdminMatTotal()" style="margin-bottom:12px;">📊 Total de materiales pedidos</button>
-    <button class="btn btn-primary" onclick="openAdminPedidos()" style="margin-bottom:12px;">📦 Historial de pedidos por lugar</button>
+    <button class="btn btn-primary" onclick="openAdminCompras()" style="margin-bottom:12px;">🛒 Materiales y compras</button>
     <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:12px;">📍 Fichadas por servicio</button>
     <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:12px;">🏖️ Vacaciones y suplencias</button>
     <button class="btn btn-primary" onclick="openAdminAusencias()" style="margin-bottom:12px;">🚫 Faltas / Ausencias</button>
@@ -595,17 +593,27 @@
     <div id="admin-comprar"></div>
   </div>
 
-  <!-- TOTAL DE MATERIALES: contador general por producto (todos los lugares) -->
-  <div id="admin-step-mattotal" style="display:none;">
+  <!-- MATERIALES Y COMPRAS: acceso único (total por producto + por lugar) -->
+  <div id="admin-step-compras" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
-    <div class="section-title" style="margin-top:16px;">Total de materiales pedidos · por producto</div>
-    <button class="btn-refresh" onclick="loadAdminMatTotal()">🔄 Actualizar</button>
-    <div id="admin-mattotal"></div>
+    <div class="section-title" style="margin-top:16px;">Materiales · falta comprar (total por producto)</div>
+    <button class="btn-refresh" onclick="loadAdminCompras()">🔄 Actualizar</button>
+    <div id="compras-total"></div>
+    <div class="section-title" style="margin-top:20px;">Ver / comprar por lugar</div>
+    <div id="compras-lugares"></div>
+    <button class="btn btn-cambiar" onclick="openAdminPedidos()" style="margin-top:16px;">📦 Historial de pedidos</button>
+  </div>
+
+  <!-- Materiales de un lugar (productos pendientes, con "Comprado") -->
+  <div id="admin-step-comprasserv" style="display:none;">
+    <button class="btn btn-cambiar" onclick="openAdminCompras()">↩ Volver a materiales</button>
+    <div class="section-title" style="margin-top:16px;" id="compras-serv-title"></div>
+    <div id="compras-serv"></div>
   </div>
 
   <!-- RESUMEN: todos los pedidos de materiales de todos, por día -->
   <div id="admin-step-pedidos" style="display:none;">
-    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <button class="btn btn-cambiar" onclick="openAdminCompras()">↩ Volver a materiales</button>
     <div class="section-title" style="margin-top:16px;">Historial de pedidos por lugar · todos los servicios</div>
     <button class="btn-refresh" onclick="loadAdminPedidos(true)">🔄 Actualizar</button>
     <div id="admin-pedidos"></div>
@@ -1957,7 +1965,8 @@
     document.getElementById("admin-step-horasextra").style.display = step === "horasextra" ? "block" : "none";
     document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
-    document.getElementById("admin-step-mattotal").style.display = step === "mattotal" ? "block" : "none";
+    document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
+    document.getElementById("admin-step-comprasserv").style.display = step === "comprasserv" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -3141,54 +3150,113 @@
     }).join("");
   }
 
-  // ---------- TOTAL DE MATERIALES PEDIDOS (admin) ----------
-  // Junta todos los pedidos activos (de todos los lugares) y los suma por
-  // producto. Reusa adminPedidosActivos (mismo dato que "Pedidos para comprar").
-  function openAdminMatTotal() {
-    adminShowStep("mattotal");
-    loadAdminMatTotal();
+  // ---------- MATERIALES Y COMPRAS (admin, acceso único) ----------
+  // Landing: total por producto de lo que FALTA COMPRAR (solo "pedido") + lista
+  // de lugares para entrar a comprar. Reusa adminPedidosActivos + comprar.
+  let comprasRecords = null;
+  let comprasServicioActual = null;
+
+  function openAdminCompras() {
+    adminShowStep("compras");
+    loadAdminCompras();
   }
 
-  async function loadAdminMatTotal() {
-    const el = document.getElementById("admin-mattotal");
-    el.innerHTML = `<div class="hist-loading">⏳ Sumando materiales pedidos...</div>`;
+  async function loadAdminCompras() {
+    const totalEl = document.getElementById("compras-total");
+    document.getElementById("compras-lugares").innerHTML = "";
+    totalEl.innerHTML = `<div class="hist-loading">⏳ Cargando materiales...</div>`;
     try {
       const j = await fetchJson({ action: "adminPedidosActivos", admin: currentUser, hash: currentHash });
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
-      const recs = j.records || [];
-      const prod = {};
-      let totPed = 0, totComp = 0;
-      recs.forEach(r => {
-        const q = parseInt(r.cantidad, 10) || 0;
-        const p = prod[r.producto] || (prod[r.producto] = { pedido: 0, comprado: 0 });
-        if (r.estado === "comprado") { p.comprado += q; totComp += q; }
-        else                         { p.pedido   += q; totPed  += q; }
-      });
-      const nombres = Object.keys(prod);
-      if (!nombres.length) { el.innerHTML = `<div class="hist-empty">No hay materiales pedidos. 🎉</div>`; return; }
-      nombres.sort((a, b) => (prod[b].pedido + prod[b].comprado) - (prod[a].pedido + prod[a].comprado));
-      el.innerHTML = `
-        <div class="hist-row" style="background:var(--cyan-light);">
-          <div><div class="hr-serv">Total general</div>
-               <div class="hr-hora">🛒 ${totPed} por comprar · 🚚 ${totComp} en camino</div></div>
-          <span class="badge badge-comprado">${totPed + totComp} u.</span>
-        </div>
-        ${nombres.map(n => {
-          const p = prod[n], t = p.pedido + p.comprado;
-          const partes = [];
-          if (p.pedido)   partes.push(`🛒 ${p.pedido} por comprar`);
-          if (p.comprado) partes.push(`🚚 ${p.comprado} en camino`);
-          return `
-          <div class="hist-row">
-            <div>
-              <div class="hr-serv">${n}</div>
-              <div class="hr-hora">${partes.join(" · ")}</div>
-            </div>
-            <span class="badge badge-sinasignar">${t} u.</span>
-          </div>`;
-        }).join("")}`;
+      comprasRecords = j.records || [];
+      renderComprasLanding();
     } catch (e) {
-      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+      totalEl.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function renderComprasLanding() {
+    const recs = comprasRecords || [];
+    // Total por producto: SOLO "pedido" (lo que falta comprar).
+    const prod = {}; let totPed = 0;
+    // Lugares: con cualquier pedido activo (pedido / comprado).
+    const lugares = {};
+    recs.forEach(r => {
+      const q = parseInt(r.cantidad, 10) || 0;
+      const l = lugares[r.servicio] || (lugares[r.servicio] = { pedido: 0, comprado: 0 });
+      if (r.estado === "comprado") { l.comprado += q; }
+      else { l.pedido += q; prod[r.producto] = (prod[r.producto] || 0) + q; totPed += q; }
+    });
+
+    const totalEl = document.getElementById("compras-total");
+    const nombres = Object.keys(prod).sort((a, b) => prod[b] - prod[a]);
+    totalEl.innerHTML = nombres.length ? `
+      <div class="hist-row" style="background:var(--cyan-light);">
+        <div><div class="hr-serv">Total a comprar</div></div>
+        <span class="badge badge-comprado">${totPed} u.</span>
+      </div>
+      ${nombres.map(n => `
+        <div class="hist-row">
+          <div><div class="hr-serv">${n}</div></div>
+          <span class="badge badge-sinasignar">${prod[n]} u.</span>
+        </div>`).join("")}`
+      : `<div class="hist-empty">No hay materiales por comprar. 🎉</div>`;
+
+    const servs = Object.keys(lugares).sort((a, b) => a.localeCompare(b));
+    document.getElementById("compras-lugares").innerHTML = servs.length
+      ? servs.map(s => {
+          const l = lugares[s];
+          const partes = [];
+          if (l.pedido)   partes.push(`🛒 ${l.pedido} por comprar`);
+          if (l.comprado) partes.push(`🚚 ${l.comprado} en camino`);
+          return `
+          <button class="service-card" onclick="verComprasServicio('${encodeURIComponent(s)}')">
+            <div><div class="s-nombre">${s}</div><div class="s-dir">${partes.join(" · ")}</div></div>
+            <span class="s-arrow">›</span>
+          </button>`;
+        }).join("")
+      : `<div class="hist-empty">Ningún lugar con pedidos.</div>`;
+  }
+
+  function verComprasServicio(servEnc) {
+    comprasServicioActual = decodeURIComponent(servEnc);
+    adminShowStep("comprasserv");
+    renderComprasServicio();
+  }
+
+  function renderComprasServicio() {
+    const serv = comprasServicioActual;
+    document.getElementById("compras-serv-title").textContent = serv;
+    const el = document.getElementById("compras-serv");
+    const items = (comprasRecords || []).filter(r => r.servicio === serv)
+      .sort((a, b) => a.producto.localeCompare(b.producto));
+    if (!items.length) { el.innerHTML = `<div class="hist-empty">Sin pedidos en este lugar.</div>`; return; }
+    el.innerHTML = items.map(r => {
+      const uni = r.cantidad ? ` · ${r.cantidad} u.` : "";
+      const accion = r.estado === "pedido"
+        ? `<button class="btn-mini btn-comprado" onclick="comprasMarcar('${encodeURIComponent(r.servicio)}','${encodeURIComponent(r.producto)}')">🛒 Comprado</button>`
+        : `<span class="mat-badge comprado">🚚 En camino</span>`;
+      return `
+      <div class="hist-row ${r.estado === 'pedido' ? 'salida' : 'entrada'}">
+        <div>
+          <div class="hr-serv">${r.producto}${uni}</div>
+          <div class="hr-hora">${r.estado === 'pedido' ? "Pedido" : "Comprado"} el ${r.fecha}</div>
+        </div>
+        ${accion}
+      </div>`;
+    }).join("");
+  }
+
+  async function comprasMarcar(servEnc, prodEnc) {
+    const servicio = decodeURIComponent(servEnc);
+    const producto = decodeURIComponent(prodEnc);
+    try {
+      const j = await fetchJson({ action: "comprar", servicio, producto, admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") { alert(j.message || "No se pudo marcar como comprado."); return; }
+      await loadAdminCompras();     // refresca datos (comprasRecords) y el landing
+      renderComprasServicio();      // re-dibuja la vista del lugar actual
+    } catch (e) {
+      alert("❌ Error: " + e.message);
     }
   }
 
