@@ -119,6 +119,14 @@
     .btn-logout  { background: none; color: var(--gray); border: 1.5px solid var(--border); font-size: 13px; padding: 10px; }
     .btn-cambiar { background: none; color: var(--cyan-dark); border: 1.5px solid var(--cyan-mid); font-size: 13px; padding: 10px; font-weight: 700; margin-top: 10px; }
 
+    /* Acordeón del menú admin */
+    .admin-group-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .grp-caret { font-size: 12px; transition: transform 0.15s; opacity: 0.85; }
+    .admin-group-btn.open .grp-caret { transform: rotate(90deg); }
+    .admin-group { border-left: 3px solid var(--cyan-mid); padding-left: 10px; margin: 4px 0 8px; }
+    .admin-group .btn { margin-top: 8px; }
+    .admin-sub-btn { background: var(--cyan-light); color: var(--cyan-dark); font-size: 14px; }
+
     .error   { color: #dc2626; font-size: 13px; margin-top: 10px; text-align: center; font-weight: 600; }
     .success { color: #16a34a; font-size: 13px; margin-top: 10px; text-align: center; font-weight: 600; }
 
@@ -568,15 +576,32 @@
 
   <!-- PASO 1: resumen diario de todos + lista de empleados -->
   <div id="admin-step-empleados">
-    <button class="btn btn-primary" onclick="openAdminResumen()" style="margin-bottom:12px;">📅 Ver todos los ingresos por día</button>
-    <button class="btn btn-primary" onclick="openAdminTardanzas()" style="margin-bottom:12px;">⏰ Llegadas tarde</button>
-    <button class="btn btn-primary" onclick="openAdminCompras()" style="margin-bottom:12px;">🛒 Materiales y compras</button>
-    <button class="btn btn-primary" onclick="openAdminServiciosLista()" style="margin-bottom:12px;">📍 Fichadas por servicio</button>
-    <button class="btn btn-primary" onclick="openAdminVacaciones()" style="margin-bottom:12px;">🏖️ Vacaciones y suplencias</button>
-    <button class="btn btn-primary" onclick="openAdminAusencias()" style="margin-bottom:12px;">🚫 Faltas / Ausencias</button>
-    <button class="btn btn-primary" onclick="openAdminHorasAsignadas()" style="margin-bottom:12px;">🕐 Horas asignadas</button>
-    <button class="btn btn-primary" onclick="openAdminHorasExtra()" style="margin-bottom:12px;">⏱️ Horas extra</button>
-    <button class="btn btn-primary" onclick="openAdminCargarFichada()" style="margin-bottom:18px;">✍️ Cargar fichada</button>
+    <!-- Grupo: Fichadas -->
+    <button class="btn btn-primary admin-group-btn" onclick="toggleAdminGroup('grp-fichadas', this)" style="margin-bottom:8px;">
+      <span>📋 Fichadas</span><span class="grp-caret">▸</span>
+    </button>
+    <div id="grp-fichadas" class="admin-group" style="display:none;">
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminResumen()">📅 Ver todos los ingresos por día</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminTardanzas()">⏰ Llegadas tarde</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminServiciosLista()">📍 Fichadas por servicio</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminHorasExtra()">⏱️ Horas extra</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminCargarFichada()">✍️ Cargar fichada</button>
+    </div>
+
+    <!-- Materiales y compras (directo) -->
+    <button class="btn btn-primary" onclick="openAdminCompras()" style="margin-bottom:8px;">🛒 Materiales y compras</button>
+
+    <!-- Grupo: Licencias y faltas -->
+    <button class="btn btn-primary admin-group-btn" onclick="toggleAdminGroup('grp-licencias', this)" style="margin-bottom:8px;">
+      <span>🏖️ Licencias y faltas</span><span class="grp-caret">▸</span>
+    </button>
+    <div id="grp-licencias" class="admin-group" style="display:none;">
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminVacaciones()">🏖️ Vacaciones y suplencias</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminAusencias()">🚫 Faltas / Ausencias</button>
+    </div>
+
+    <!-- Horas asignadas (directo) -->
+    <button class="btn btn-primary" onclick="openAdminHorasAsignadas()" style="margin-bottom:18px;">🕐 Horas asignadas</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -987,27 +1012,38 @@
   }
 
   // Resumen de faltas por mes (en la pestaña Historial): total + clasificación.
+  // Clave ordenable yyyymmdd desde "dd/mm/yyyy" (para ordenar faltas dentro del mes).
+  function fechaSortKey(f) {
+    const p = (f || "").trim().split("/");
+    if (p.length !== 3) return "00000000";
+    return `${p[2]}${String(+p[1]).padStart(2, "0")}${String(+p[0]).padStart(2, "0")}`;
+  }
+
   function renderMisFaltas() {
     const el = document.getElementById("hist-faltas");
     if (!el) return;
     if (!misAusencias.length) { el.innerHTML = ""; return; }
     const meses = {};
     misAusencias.forEach(a => {
-      const m = meses[mesKey(a.fecha)] || (meses[mesKey(a.fecha)] = { total: 0, just: 0, injust: 0, sinc: 0 });
-      m.total++;
-      if (a.clasificacion === "Justificada") m.just++;
-      else if (a.clasificacion === "Injustificada") m.injust++;
-      else m.sinc++;
+      (meses[mesKey(a.fecha)] || (meses[mesKey(a.fecha)] = [])).push(a);
     });
     const ord = Object.keys(meses).sort().reverse();
     el.innerHTML = `
       <div class="section-title">Mis faltas por mes</div>
       ${ord.map(k => {
-        const m = meses[k];
-        return `<div class="hist-row salida">
-          <div><div class="hr-serv">${mesLabel(k)}</div>
-               <div class="hr-hora">✅ ${m.just} justificadas · ⚠️ ${m.injust} injustificadas${m.sinc ? ` · ${m.sinc} sin revisar` : ""}</div></div>
-          <span class="badge badge-salida">${m.total}</span>
+        const rows = meses[k].slice().sort((a, b) => fechaSortKey(b.fecha).localeCompare(fechaSortKey(a.fecha)));
+        const just = rows.filter(r => r.clasificacion === "Justificada").length;
+        const injust = rows.filter(r => r.clasificacion === "Injustificada").length;
+        const sinc = rows.length - just - injust;
+        return `<div style="margin-bottom:10px;">
+          <div class="hr-serv" style="font-size:13px;color:var(--gray);margin:10px 0 2px;">
+            ${mesLabel(k)} · ✅ ${just} · ⚠️ ${injust}${sinc ? ` · ${sinc} sin revisar` : ""}
+          </div>
+          ${rows.map(r => `<div class="hist-row salida">
+            <div><div class="hr-serv">${r.fecha} · ${r.servicio}</div>
+                 ${r.motivo ? `<div class="hr-hora">📝 ${r.motivo}</div>` : ""}</div>
+            ${ausenciaBadge(r.clasificacion)}
+          </div>`).join("")}
         </div>`;
       }).join("")}`;
   }
@@ -2125,6 +2161,15 @@
 
   function adminBackEmpleados() { renderAdminEmpleados(); }
   function adminBackServicios() { adminShowStep("servicios"); }
+
+  // Despliega/pliega un grupo del menú admin (acordeón). Cierra los demás.
+  function toggleAdminGroup(id, btn) {
+    const target = document.getElementById(id);
+    const abrir = target.style.display === "none";
+    document.querySelectorAll("#admin-step-empleados .admin-group").forEach(g => g.style.display = "none");
+    document.querySelectorAll("#admin-step-empleados .admin-group-btn").forEach(b => b.classList.remove("open"));
+    if (abrir) { target.style.display = ""; btn.classList.add("open"); }
+  }
 
   // Trae (y cachea por empleado) todas las fichadas de un empleado.
   async function adminFetchRecords() {
