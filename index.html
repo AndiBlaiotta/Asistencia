@@ -477,7 +477,7 @@
     <button class="tab-btn active" id="tbtn-registrar"  onclick="switchTab('registrar')">📝 Registrar</button>
     <button class="tab-btn"        id="tbtn-materiales" onclick="switchTab('materiales')">📦 Materiales</button>
     <button class="tab-btn"        id="tbtn-historial"  onclick="switchTab('historial')">📋 Historial</button>
-    <button class="tab-btn"        id="tbtn-vacaciones" onclick="switchTab('vacaciones')">🏖️ Vacaciones</button>
+    <button class="tab-btn"        id="tbtn-vacaciones" onclick="switchTab('vacaciones')">🏖️ Licencias</button>
   </div>
 
   <!-- TAB: REGISTRAR -->
@@ -534,10 +534,10 @@
     <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
   </div>
 
-  <!-- TAB: VACACIONES -->
+  <!-- TAB: LICENCIAS (vacaciones + otras licencias + permisos) -->
   <div id="tab-vacaciones">
     <div id="vac-saldo"></div>
-    <div class="section-title">Solicitar vacaciones</div>
+    <div class="section-title">🏖️ Solicitar vacaciones</div>
     <label for="vac-desde">Desde</label>
     <input type="date" id="vac-desde" onchange="onVacFechas()">
     <label for="vac-hasta">Hasta</label>
@@ -546,8 +546,14 @@
     <button class="btn btn-primary" id="vac-enviar" onclick="enviarVacaciones()" disabled>Enviar solicitud</button>
     <div id="vac-msg" class="success" style="margin-top:10px;"></div>
 
-    <div class="section-title" style="margin-top:24px;">🩺 Licencia médica</div>
-    <div style="font-size:12px;color:var(--gray);font-weight:600;margin-bottom:4px;">Cargá el plazo de tu licencia (no descuenta días de vacaciones).</div>
+    <div class="section-title" style="margin-top:24px;">📋 Otras licencias</div>
+    <div style="font-size:12px;color:var(--gray);font-weight:600;margin-bottom:4px;">Licencia médica, días de estudio o ausencia avisada (no descuentan días de vacaciones).</div>
+    <label for="lic-tipo">Tipo</label>
+    <select id="lic-tipo">
+      <option value="Licencia médica">🩺 Licencia médica</option>
+      <option value="Días de estudio">📚 Días de estudio</option>
+      <option value="Ausente con aviso">📢 Ausente con aviso</option>
+    </select>
     <label for="lic-desde">Desde</label>
     <input type="date" id="lic-desde" onchange="onLicFechas()">
     <label for="lic-hasta">Hasta</label>
@@ -556,8 +562,29 @@
     <button class="btn btn-primary" id="lic-enviar" onclick="cargarLicencia()" disabled>Cargar licencia</button>
     <div id="lic-msg" class="success" style="margin-top:10px;"></div>
 
+    <div class="section-title" style="margin-top:24px;">⏱️ Permisos de un día</div>
+    <div style="font-size:12px;color:var(--gray);font-weight:600;margin-bottom:4px;">Pedí llegar más tarde o retirarte antes un día puntual. Si te lo aprueban, ese día no cuenta como tardanza.</div>
+    <label for="perm-tipo">Tipo</label>
+    <select id="perm-tipo" onchange="onPermTipo()">
+      <option value="Llegada más tarde">🕘 Llegar más tarde</option>
+      <option value="Retiro anticipado">🚪 Retirarme antes</option>
+    </select>
+    <label for="perm-servicio">Servicio</label>
+    <select id="perm-servicio"><option value="">-- Elegí un servicio --</option></select>
+    <label for="perm-fecha">Día</label>
+    <input type="date" id="perm-fecha" onchange="onPermValid()">
+    <label for="perm-hora" id="perm-hora-lbl">Hora de llegada</label>
+    <input type="time" id="perm-hora" onchange="onPermValid()">
+    <label for="perm-motivo">Motivo (opcional)</label>
+    <input type="text" id="perm-motivo" placeholder="Ej: turno médico, trámite...">
+    <button class="btn btn-primary" id="perm-enviar" onclick="enviarPermiso()" disabled>Pedir permiso</button>
+    <div id="perm-msg" class="success" style="margin-top:10px;"></div>
+
     <div class="section-title" style="margin-top:24px;">Mis solicitudes</div>
     <div id="vac-lista"><div class="hist-empty">Cargando...</div></div>
+
+    <div class="section-title" style="margin-top:20px;">Mis permisos</div>
+    <div id="perm-lista"><div class="hist-empty">Cargando...</div></div>
   </div>
 
   <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
@@ -596,7 +623,7 @@
       <span>🏖️ Licencias y faltas</span><span class="grp-caret">▸</span>
     </button>
     <div id="grp-licencias" class="admin-group" style="display:none;">
-      <button class="btn btn-primary admin-sub-btn" onclick="openAdminVacaciones()">🏖️ Vacaciones y suplencias</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminVacaciones()">🏖️ Licencias, permisos y suplencias</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminAusencias()">🚫 Faltas / Ausencias</button>
     </div>
 
@@ -712,9 +739,11 @@
   <!-- VACACIONES: solicitudes, aprobación y asignación de suplentes -->
   <div id="admin-step-vacaciones" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
-    <div class="section-title" style="margin-top:16px;">Vacaciones y licencias médicas</div>
+    <div class="section-title" style="margin-top:16px;">Licencias y suplencias</div>
     <button class="btn-refresh" onclick="loadAdminVacaciones(true)">🔄 Actualizar</button>
     <div id="admin-vacaciones"></div>
+    <div class="section-title" style="margin-top:22px;">⏱️ Permisos de un día</div>
+    <div id="admin-permisos"></div>
   </div>
 
   <!-- LISTA DE SERVICIOS: todos los servicios de la empresa (accesos separados) -->
@@ -925,6 +954,37 @@
   // de otro, solo durante el período). Se cargan al entrar; ver cargarCoberturas.
   let coberturasActivas = [];
 
+  // Permisos del empleado (todos; se filtran por hoy/aprobado al usarlos). Se
+  // cargan al entrar para que calcularEstado no marque "Tarde" si hay una
+  // "Llegada más tarde" aprobada para hoy. Ver cargarPermisosHoy.
+  let permisosHoy = [];
+
+  // "dd/mm/yyyy" (o "d/m/yyyy") -> entero yyyymmdd, para comparar fechas.
+  function dmyToInt(s) {
+    const p = (s || "").trim().split("/");
+    if (p.length !== 3) return NaN;
+    return (+p[2]) * 10000 + (+p[1]) * 100 + (+p[0]);
+  }
+
+  // Hora acordada de una "Llegada más tarde" aprobada para hoy en ese servicio,
+  // o null. Corre el horario de referencia de la tardanza ese día.
+  function permisoLlegadaHoy(servicioNombre, now) {
+    const hoyInt = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+    const m = permisosHoy.find(pm => pm.tipo === "Llegada más tarde" &&
+      pm.servicio === servicioNombre && pm.estado === "Aceptada" && dmyToInt(pm.fecha) === hoyInt);
+    return m ? m.hora : null;
+  }
+
+  // Trae los permisos del empleado (para la lógica de tardanza de hoy).
+  async function cargarPermisosHoy() {
+    try {
+      const j = await fetchJson({ action: "misPermisos", empleado: currentUser, hash: currentHash });
+      permisosHoy = (j.status === "ok" && j.records) ? j.records : [];
+    } catch (e) {
+      permisosHoy = [];
+    }
+  }
+
   // Un servicio "cubierto" se muestra como uno normal, con la dirección y el
   // horario reales del titular (los saca de SERVICIOS[titular]).
   function servicioCubiertoObj(c) {
@@ -1059,8 +1119,12 @@
   function calcularEstado(servicio, now) {
     const h = servicio && servicio.horario;
     if (!h || !h.starts) return "";
-    const inicio = h.starts[now.getDay()];
+    let inicio = h.starts[now.getDay()];
     if (!inicio) return "";
+    // Si hay una "Llegada más tarde" aprobada para hoy, la referencia pasa a ser
+    // la hora acordada (llegar dentro de esa hora = "A tiempo", no cuenta tarde).
+    const permiso = permisoLlegadaHoy(servicio.nombre, now);
+    if (permiso) inicio = permiso;
     const [ih, im] = inicio.split(":").map(Number);
     const diff = (now.getHours() * 60 + now.getMinutes()) - (ih * 60 + im);
     return diff > TOLERANCIA_TARDE_MIN ? `Tarde ${diff} min` : "A tiempo";
@@ -1157,6 +1221,7 @@
     renderServices();
     cargarCoberturas();
     cargarAusencias();
+    cargarPermisosHoy();
   }
 
   // Al abrir la app, restaurar sesión si hay una guardada.
@@ -1292,6 +1357,7 @@
     currentUser = currentHash = currentCoords = selectedService = null;
     adminEmpleado = adminServicio = null;
     coberturasActivas = [];
+    permisosHoy = [];
     misVacacionesSaldo = null;
     misAusencias = [];
     ausenciasQueue = [];
@@ -1555,7 +1621,7 @@
     });
     if (tab === "historial")  { renderMisFaltas(); cargarHistorial(); }
     if (tab === "materiales") renderMaterialesTab();
-    if (tab === "vacaciones") cargarMisVacaciones();
+    if (tab === "vacaciones") { llenarPermServicios(); onPermTipo(); cargarMisVacaciones(); cargarMisPermisos(); }
   }
 
   // Helper: fetch con JSON (comparte armado de URL para acciones nuevas).
@@ -1656,9 +1722,10 @@
     btn.disabled = true;
     msg.className = "success"; msg.textContent = "Enviando...";
     try {
+      const tipo = document.getElementById("lic-tipo").value || "Licencia médica";
       const j = await fetchJson({
         action: "solicitarVacaciones", empleado: currentUser, hash: currentHash,
-        desde: isoToDMY(desdeIso), hasta: isoToDMY(hastaIso), tipo: "Licencia médica"
+        desde: isoToDMY(desdeIso), hasta: isoToDMY(hastaIso), tipo
       });
       if (j.status !== "ok") {
         msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo cargar.");
@@ -1672,6 +1739,20 @@
     } catch (e) {
       msg.className = "error"; msg.textContent = "❌ " + e.message; btn.disabled = false;
     }
+  }
+
+  // Etiqueta con ícono para cada tipo de licencia (compartido empleado/admin).
+  function tipoLicenciaLabel(tipo) {
+    switch (tipo) {
+      case "Licencia médica":   return "🩺 Licencia médica";
+      case "Días de estudio":   return "📚 Días de estudio";
+      case "Ausente con aviso": return "📢 Ausente con aviso";
+      default:                  return "🏖️ Vacaciones";
+    }
+  }
+  // Etiqueta con ícono para cada tipo de permiso de un día.
+  function tipoPermisoLabel(tipo) {
+    return tipo === "Retiro anticipado" ? "🚪 Retiro anticipado" : "🕘 Llegada más tarde";
   }
 
   // Badge de estado de una solicitud (compartido empleado/admin).
@@ -1721,8 +1802,77 @@
       el.innerHTML = recs.map(r => `
         <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
           <div>
-            <div class="hr-serv">${r.tipo === "Licencia médica" ? "🩺 Licencia médica" : "🏖️ Vacaciones"}</div>
+            <div class="hr-serv">${tipoLicenciaLabel(r.tipo)}</div>
             <div class="hr-hora">${r.desde} → ${r.hasta} · ${r.dias} ${r.dias == 1 ? "día" : "días"}</div>
+          </div>
+          ${vacEstadoBadge(r.estado)}
+        </div>`).join("");
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  // ---------- PERMISOS DE UN DÍA (empleado) ----------
+  // El label de la hora cambia según el tipo (llegada vs salida).
+  function onPermTipo() {
+    const tipo = document.getElementById("perm-tipo").value;
+    document.getElementById("perm-hora-lbl").textContent =
+      tipo === "Retiro anticipado" ? "Hora de salida" : "Hora de llegada";
+    onPermValid();
+  }
+  function onPermValid() {
+    const serv  = document.getElementById("perm-servicio").value;
+    const fecha = document.getElementById("perm-fecha").value;
+    const hora  = document.getElementById("perm-hora").value;
+    document.getElementById("perm-enviar").disabled = !(serv && fecha && hora);
+  }
+  // Llena el selector con los servicios propios del empleado (con horario fijo).
+  function llenarPermServicios() {
+    const sel = document.getElementById("perm-servicio");
+    if (!sel) return;
+    const propios = (SERVICIOS[currentUser] || []).filter(s => s.horario && s.horario.starts);
+    sel.innerHTML = `<option value="">-- Elegí un servicio --</option>` +
+      propios.map(s => `<option value="${s.nombre}">${s.nombre}</option>`).join("");
+  }
+  async function enviarPermiso() {
+    const tipo     = document.getElementById("perm-tipo").value;
+    const servicio = document.getElementById("perm-servicio").value;
+    const fechaIso = document.getElementById("perm-fecha").value;
+    const hora     = document.getElementById("perm-hora").value;
+    const motivo   = document.getElementById("perm-motivo").value.trim();
+    const msg      = document.getElementById("perm-msg");
+    if (!servicio || !fechaIso || !hora) { msg.className = "error"; msg.textContent = "Completá servicio, día y hora."; return; }
+    const btn = document.getElementById("perm-enviar");
+    btn.disabled = true;
+    msg.className = "success"; msg.textContent = "Enviando...";
+    try {
+      const j = await fetchJson({
+        action: "solicitarPermiso", empleado: currentUser, hash: currentHash,
+        servicio, tipo, fecha: isoToDMY(fechaIso), hora, motivo
+      });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo pedir."); btn.disabled = false; return; }
+      msg.className = "success"; msg.textContent = "✅ Permiso solicitado.";
+      document.getElementById("perm-fecha").value = "";
+      document.getElementById("perm-hora").value = "";
+      document.getElementById("perm-motivo").value = "";
+      cargarMisPermisos();
+    } catch (e) {
+      msg.className = "error"; msg.textContent = "❌ " + e.message; btn.disabled = false;
+    }
+  }
+  async function cargarMisPermisos() {
+    const el = document.getElementById("perm-lista");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "misPermisos", empleado: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      const recs = j.records || [];
+      if (!recs.length) { el.innerHTML = `<div class="hist-empty">No pediste permisos todavía.</div>`; return; }
+      el.innerHTML = recs.map(r => `
+        <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
+          <div>
+            <div class="hr-serv">${tipoPermisoLabel(r.tipo)} · ${r.servicio}</div>
+            <div class="hr-hora">${r.fecha} · ${r.hora}${r.motivo ? " · " + r.motivo : ""}</div>
           </div>
           ${vacEstadoBadge(r.estado)}
         </div>`).join("");
@@ -2836,7 +2986,7 @@
   }
 
   // ---------- VACACIONES / COBERTURAS (admin) ----------
-  let adminVacacionesCache = null, adminCoberturasCache = null;
+  let adminVacacionesCache = null, adminCoberturasCache = null, adminPermisosCache = null;
 
   function openAdminVacaciones() {
     adminShowStep("vacaciones");
@@ -2846,18 +2996,58 @@
   async function loadAdminVacaciones() {
     const el = document.getElementById("admin-vacaciones");
     el.innerHTML = `<div class="hist-loading">⏳ Cargando solicitudes...</div>`;
+    document.getElementById("admin-permisos").innerHTML = `<div class="hist-loading">⏳ Cargando permisos...</div>`;
     try {
-      const [v, c] = await Promise.all([
+      const [v, c, pm] = await Promise.all([
         fetchJson({ action: "adminVacaciones", admin: currentUser, hash: currentHash }),
-        fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash })
+        fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash }),
+        fetchJson({ action: "adminPermisos", admin: currentUser, hash: currentHash })
       ]);
       if (v.status !== "ok") throw new Error(v.message || "No se pudo cargar.");
       adminVacacionesCache = v.records || [];
       adminCoberturasCache = (c.status === "ok" && c.records) ? c.records : [];
+      adminPermisosCache   = (pm.status === "ok" && pm.records) ? pm.records : [];
       renderAdminVacaciones();
+      renderAdminPermisos();
     } catch (e) {
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
+  }
+
+  function renderAdminPermisos() {
+    const el = document.getElementById("admin-permisos");
+    const perms = adminPermisosCache || [];
+    if (!perms.length) { el.innerHTML = `<div class="hist-empty">No hay permisos.</div>`; return; }
+    const orden = { Pendiente: 0, Aceptada: 1, Rechazada: 2 };
+    const val = e => (orden[e] === undefined ? 9 : orden[e]);
+    const sorted = perms.slice().sort((a, b) => val(a.estado) - val(b.estado));
+    el.innerHTML = sorted.map(pm => {
+      const acciones = pm.estado === "Pendiente"
+        ? `<div style="display:flex;gap:8px;margin-top:10px;">
+             <button class="btn-mini btn-recibido" onclick="resolverPerm('${pm.id}','Aceptada')">✅ Aceptar</button>
+             <button class="btn-mini btn-anular" onclick="resolverPerm('${pm.id}','Rechazada')">❌ Rechazar</button>
+           </div>`
+        : "";
+      return `
+        <div style="border:1.5px solid var(--border);border-left:4px solid var(--cyan);border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+              <div class="s-nombre">${pm.empleado}</div>
+              <div class="s-dir">${tipoPermisoLabel(pm.tipo)} · ${pm.servicio} · ${pm.fecha} · ${pm.hora}${pm.motivo ? " · " + pm.motivo : ""}</div>
+            </div>
+            ${vacEstadoBadge(pm.estado)}
+          </div>
+          ${acciones}
+        </div>`;
+    }).join("");
+  }
+
+  async function resolverPerm(id, estado) {
+    const txt = estado === "Aceptada" ? "aceptar" : "rechazar";
+    if (!confirm(`¿Seguro que querés ${txt} este permiso?`)) return;
+    const j = await fetchJson({ action: "resolverPermiso", admin: currentUser, hash: currentHash, id, estado });
+    if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
+    loadAdminVacaciones();
   }
 
   // id de elemento válido a partir del nombre del servicio.
@@ -2885,7 +3075,7 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div>
               <div class="s-nombre">${v.empleado}</div>
-              <div class="s-dir">${v.tipo === "Licencia médica" ? "🩺 Licencia médica" : "🏖️ Vacaciones"} · ${v.desde} → ${v.hasta} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
+              <div class="s-dir">${tipoLicenciaLabel(v.tipo)} · ${v.desde} → ${v.hasta} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
             </div>
             ${vacEstadoBadge(v.estado)}
           </div>

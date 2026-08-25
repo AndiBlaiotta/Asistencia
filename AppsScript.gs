@@ -39,7 +39,7 @@ const HEADERS = [
 // Hojas que NO son de empleados (no llevan fichadas): se saltean al recorrer
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
-                           "Vacaciones", "Coberturas", "Ausencias"];
+                           "Vacaciones", "Coberturas", "Ausencias", "Permisos"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -49,6 +49,20 @@ const VACAS_SHEET   = "Vacaciones";
 const VACAS_HEADERS = ["ID", "Empleado", "Desde", "Hasta", "Días", "Estado", "Solicitado", "Resuelto", "Tipo"];
 const COBERTURAS_SHEET   = "Coberturas";
 const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente", "Desde", "Hasta", "Asignado"];
+
+// Tipos de licencia (van todos a la hoja "Vacaciones", campo Tipo). Solo
+// "Vacaciones" consume días de cupo y tiene la regla de 7; el resto es por
+// plazo (no descuenta días). Cualquier licencia Aceptada/Pendiente exime al
+// empleado de generar faltas esos días (ver detectarAusencias).
+const LICENCIA_TIPOS = ["Vacaciones", "Licencia médica", "Días de estudio", "Ausente con aviso"];
+
+// ---- Permisos (día parcial) ----
+// "Permisos": pedidos de llegar más tarde o retirarse antes un día puntual, con
+// hora acordada. Una "Llegada más tarde" APROBADA mueve el horario de referencia
+// de ese día/servicio (el cliente no marca "Tarde" si llega dentro de esa hora).
+const PERMISOS_SHEET   = "Permisos";
+const PERMISOS_HEADERS = ["ID", "Empleado", "Fecha", "Servicio", "Tipo", "Hora", "Estado", "Solicitado", "Motivo"];
+const PERMISO_TIPOS    = ["Llegada más tarde", "Retiro anticipado"];
 
 // Config de vacaciones por empleado. `alta` = fecha de ingreso (dd/MM/yyyy).
 // `tomadasPrevias` = días ya tomados fuera del sistema (histórico, arranque).
@@ -826,6 +840,18 @@ function getCoberturasSheet() {
     sheet = ss.insertSheet(COBERTURAS_SHEET);
     sheet.appendRow(COBERTURAS_HEADERS);
     sheet.getRange(1, 1, 1, COBERTURAS_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+function getPermisosSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(PERMISOS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(PERMISOS_SHEET);
+    sheet.appendRow(PERMISOS_HEADERS);
+    sheet.getRange(1, 1, 1, PERMISOS_HEADERS.length)
       .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
     sheet.setFrozenRows(1);
   }
@@ -1638,9 +1664,10 @@ function doGet(e) {
     if (hi < di) return jsonOut({ status: "error", message: "La fecha 'hasta' es anterior a 'desde'" });
     const dias = diasEntre(desde, hasta);
     if (typeof dias !== "number" || dias < 1) return jsonOut({ status: "error", message: "Fechas inválidas" });
-    const tipo = (p.tipo === "Licencia médica") ? "Licencia médica" : "Vacaciones";
-    // La regla de saldo/7 solo aplica a VACACIONES. La licencia médica no
-    // consume días ni tiene tope (es por certificado, no por cupo).
+    const tipo = (LICENCIA_TIPOS.indexOf(p.tipo) !== -1) ? p.tipo : "Vacaciones";
+    // La regla de saldo/7 solo aplica a VACACIONES. Los demás tipos (licencia
+    // médica, días de estudio, ausente con aviso) no consumen días ni tienen
+    // tope (son por plazo/certificado, no por cupo).
     if (tipo === "Vacaciones") {
       const saldo = saldoVacaciones(p.empleado);
       if (saldo.disponibles <= 0) {
@@ -1800,6 +1827,96 @@ function doGet(e) {
         id: r[0], vacacionId: r[1], servicio: r[2], titular: r[3], suplente: r[4], desde: r[5], hasta: r[6]
       }));
       return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado pide un permiso (llegar más tarde / retirarse antes) ----
+  if (p.action === "solicitarPermiso" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    const servicio = (p.servicio || "").toString();
+    const tipo     = (p.tipo || "").toString();
+    const fecha    = (p.fecha || "").toString();
+    const hora     = (p.hora || "").toString();
+    if (PERMISO_TIPOS.indexOf(tipo) === -1) {
+      return jsonOut({ status: "error", message: "Tipo de permiso inválido" });
+    }
+    // El servicio tiene que ser uno propio del empleado (con horario definido).
+    if (!(HORARIOS[p.empleado] || {})[servicio]) {
+      return jsonOut({ status: "error", message: "Servicio inválido" });
+    }
+    if (isNaN(fechaAInt(fecha))) return jsonOut({ status: "error", message: "Fecha inválida" });
+    if (!/^\d{1,2}:\d{2}$/.test(hora)) return jsonOut({ status: "error", message: "Hora inválida" });
+    try {
+      const sheet = getPermisosSheet();
+      const id    = Utilities.getUuid().slice(0, 8);
+      const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      const row   = sheet.getLastRow() + 1;
+      sheet.getRange(row, 1, 1, PERMISOS_HEADERS.length).setNumberFormat("@")
+        .setValues([[id, p.empleado, fecha, servicio, tipo, hora, "Pendiente", now, (p.motivo || "").toString()]]);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado ve sus permisos y su estado ----
+  if (p.action === "misPermisos" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getPermisosSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, PERMISOS_HEADERS.length).getValues();
+      const records = data
+        .filter(r => (r[1] || "").toString() === p.empleado)
+        .map(r => ({ id: r[0], fecha: r[2], servicio: r[3], tipo: r[4], hora: r[5], estado: r[6], motivo: (r[8] || "").toString() }))
+        .reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: ver todos los permisos ----
+  if (p.action === "adminPermisos") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getPermisosSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, PERMISOS_HEADERS.length).getValues();
+      const records = data.map(r => ({
+        id: r[0], empleado: r[1], fecha: r[2], servicio: r[3], tipo: r[4], hora: r[5], estado: r[6], motivo: (r[8] || "").toString()
+      })).reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: aceptar o rechazar un permiso ----
+  if (p.action === "resolverPermiso" && p.id && p.estado) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (["Aceptada", "Rechazada", "Pendiente"].indexOf(p.estado) === -1) {
+      return jsonOut({ status: "error", message: "Estado inválido" });
+    }
+    try {
+      const sheet = getPermisosSheet();
+      const last  = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay permisos" });
+      const ids = sheet.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "Permiso no encontrado" });
+      sheet.getRange(idx + 2, 7).setValue(p.estado);
+      return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
