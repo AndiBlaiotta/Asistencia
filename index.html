@@ -112,6 +112,27 @@
     input[type="date"], input[type="time"] { min-width: 0; }
     input:focus, select:focus { border-color: var(--cyan); background: white; box-shadow: 0 0 0 3px rgba(26,143,190,0.15); }
 
+    /* Barra de filtros reutilizable (empleado + período) en vistas de admin */
+    .filtro-bar {
+      background: #F4FAFC;
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+    .filtro-bar label { margin-top: 12px; }
+    .filtro-bar label:first-child { margin-top: 0; }
+    .filtro-total {
+      font-size: 13px;
+      color: var(--black);
+      background: #EEF6FA;
+      border-left: 3px solid var(--cyan);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+    }
+    .filtro-total b { color: var(--cyan); }
+
     /* Campo de contraseña con ojito para mostrar/ocultar */
     .pass-wrap { position: relative; }
     .pass-wrap input { padding-right: 46px; }
@@ -2194,6 +2215,7 @@
   let adminResumenCache = null;
 
   function openAdminResumen() {
+    resetFiltro("res");
     adminShowStep("resumen");
     loadAdminResumen(false);
   }
@@ -2216,6 +2238,108 @@
     if (/p\.?\s*m/.test(h) && hh < 12) hh += 12;
     if (/a\.?\s*m/.test(h) && hh === 12) hh = 0;
     return hh * 3600 + (+m[2]) * 60 + (+(m[3] || 0));
+  }
+
+  // ---------- FILTRO REUTILIZABLE (empleado + período) ----------
+  // Barra de filtros común a las vistas de admin: elegir un empleado (o todos)
+  // y un período (todos = desde el inicio / un mes puntual / un rango de fechas
+  // personalizado). El estado vive por "id" de vista y persiste entre renders;
+  // al cambiar cualquier control se re-renderiza la vista que lo registró.
+  const _filtros = {}; // id -> { state, render }
+
+  function _filtroEntry(id) {
+    if (!_filtros[id]) _filtros[id] = { state: { emp: "", periodo: "all", desde: "", hasta: "" }, render: null };
+    return _filtros[id];
+  }
+  function filtroState(id) { return _filtroEntry(id).state; }
+  function registrarFiltroRender(id, render) { _filtroEntry(id).render = render; }
+  function resetFiltro(id) { Object.assign(filtroState(id), { emp: "", periodo: "all", desde: "", hasta: "" }); }
+
+  // Cambio de cualquier control: vuelca el DOM al estado y re-renderiza.
+  function onFiltroChange(id) {
+    const f = _filtros[id]; if (!f) return;
+    const st = f.state;
+    const val = suf => { const e = document.getElementById(id + suf); return e ? e.value : null; };
+    const emp = val("-emp");   if (emp   !== null) st.emp = emp;
+    const per = val("-per");   if (per   !== null) st.periodo = per;
+    const des = val("-desde"); if (des   !== null) st.desde = des;
+    const has = val("-hasta"); if (has   !== null) st.hasta = has;
+    if (f.render) f.render();
+  }
+
+  // Claves de mes (yyyy-MM) presentes en records con .fecha, más nuevo primero.
+  function mesesDeRecords(records) {
+    return [...new Set(records.map(r => mesKey(r.fecha)))]
+      .filter(k => k !== "0000-00").sort().reverse();
+  }
+
+  // HTML de la barra. opts: { empleados:[...]|null, meses:[keys], rango:true }.
+  function filtroBarHtml(id, st, opts) {
+    opts = opts || {};
+    let html = "";
+    if (opts.empleados) {
+      const emps = opts.empleados;
+      if (st.emp && emps.indexOf(st.emp) === -1) st.emp = "";
+      html += `
+        <label for="${id}-emp">Empleado</label>
+        <select id="${id}-emp" onchange="onFiltroChange('${id}')">
+          <option value="">Todos los empleados</option>
+          ${emps.map(e => `<option value="${e}"${e === st.emp ? " selected" : ""}>${e}</option>`).join("")}
+        </select>`;
+    }
+    const meses = opts.meses || [];
+    if (st.periodo !== "all" && st.periodo !== "rango" && meses.indexOf(st.periodo) === -1) st.periodo = "all";
+    const conRango = opts.rango !== false;
+    html += `
+      <label for="${id}-per">Período</label>
+      <select id="${id}-per" onchange="onFiltroChange('${id}')">
+        <option value="all"${st.periodo === "all" ? " selected" : ""}>Todos (desde el inicio)</option>
+        ${meses.map(k => `<option value="${k}"${st.periodo === k ? " selected" : ""}>${mesLabel(k)}</option>`).join("")}
+        ${conRango ? `<option value="rango"${st.periodo === "rango" ? " selected" : ""}>Personalizado…</option>` : ""}
+      </select>`;
+    if (conRango && st.periodo === "rango") {
+      html += `
+        <div style="display:flex;gap:8px;">
+          <div style="flex:1;">
+            <label for="${id}-desde">Desde</label>
+            <input type="date" id="${id}-desde" value="${st.desde}" onchange="onFiltroChange('${id}')">
+          </div>
+          <div style="flex:1;">
+            <label for="${id}-hasta">Hasta</label>
+            <input type="date" id="${id}-hasta" value="${st.hasta}" onchange="onFiltroChange('${id}')">
+          </div>
+        </div>`;
+    }
+    return `<div class="filtro-bar">${html}</div>`;
+  }
+
+  // Filtra records (con .fecha "d/M/yyyy") por el período del estado.
+  function filtrarPeriodo(records, st) {
+    if (st.periodo === "rango") {
+      const d = st.desde ? +st.desde.replace(/-/g, "") : -Infinity;
+      const h = st.hasta ? +st.hasta.replace(/-/g, "") :  Infinity;
+      return records.filter(r => { const k = fechaKey(r.fecha); return k >= d && k <= h; });
+    }
+    if (st.periodo !== "all") return records.filter(r => mesKey(r.fecha) === st.periodo);
+    return records;
+  }
+  // Filtra por empleado y período juntos (records con .empleado y .fecha).
+  function filtrarEmpPeriodo(records, st) {
+    const rec = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    return filtrarPeriodo(rec, st);
+  }
+
+  // Etiqueta legible del período elegido (para títulos/resúmenes).
+  function periodoLabel(st) {
+    if (st.periodo === "all") return "desde el inicio";
+    if (st.periodo === "rango") {
+      const f = iso => iso ? iso.split("-").reverse().join("/") : "";
+      if (st.desde && st.hasta) return `${f(st.desde)} a ${f(st.hasta)}`;
+      if (st.desde) return `desde ${f(st.desde)}`;
+      if (st.hasta) return `hasta ${f(st.hasta)}`;
+      return "período personalizado";
+    }
+    return mesLabel(st.periodo);
   }
 
   async function loadAdminResumen(forzar) {
@@ -2244,11 +2368,28 @@
       el.innerHTML = `<div class="hist-empty">No hay ingresos registrados.</div>`;
       return;
     }
+    registrarFiltroRender("res", () => renderAdminResumen(adminResumenCache || []));
+    const st = filtroState("res");
+
+    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const selectorHtml = filtroBarHtml("res", st, { empleados, meses: mesesDeRecords(recEmp) });
+
+    const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}desde el inicio: `
+      + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "registro" : "registros"}</div>`;
+
+    const rec = filtrarPeriodo(recEmp, st);
+    if (!rec.length) {
+      el.innerHTML = selectorHtml + totalHtml
+        + `<div class="hist-empty">Sin ingresos en ${periodoLabel(st)}.</div>`;
+      return;
+    }
+
     const grupos = {};
-    records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+    rec.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
 
     const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
-    el.innerHTML = fechas.map(fecha => {
+    el.innerHTML = selectorHtml + totalHtml + fechas.map(fecha => {
       const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
       return `
       <div class="hist-day">
@@ -2439,6 +2580,7 @@
 
   async function adminLoadFichadas() {
     const el = document.getElementById("admin-registros");
+    resetFiltro("fich");
     el.innerHTML = `<div class="hist-loading">⏳ Cargando registros...</div>`;
     try {
       const records   = await adminFetchRecords();
@@ -2529,10 +2671,23 @@
       el.innerHTML = `<div class="hist-empty">No hay registros para este servicio.</div>`;
       return;
     }
-    const grupos = {};
-    records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+    registrarFiltroRender("fich", () => renderAdminRegistros(records, mostrarDir));
+    const st = filtroState("fich");
+    // Solo período (el empleado y el servicio ya están fijos en esta vista).
+    const selectorHtml = filtroBarHtml("fich", st, { meses: mesesDeRecords(records) });
+    const totalHtml = `<div class="filtro-total">Total desde el inicio: `
+      + `<b>${records.length}</b> ${records.length === 1 ? "registro" : "registros"}</div>`;
 
-    el.innerHTML = Object.entries(grupos).map(([fecha, regs]) => `
+    const rec = filtrarPeriodo(records, st);
+    if (!rec.length) {
+      el.innerHTML = selectorHtml + totalHtml
+        + `<div class="hist-empty">Sin registros en ${periodoLabel(st)}.</div>`;
+      return;
+    }
+    const grupos = {};
+    rec.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+
+    el.innerHTML = selectorHtml + totalHtml + Object.entries(grupos).map(([fecha, regs]) => `
       <div class="hist-day">
         <div class="hist-day-label">${fecha}</div>
         ${regs.map(r => `
@@ -2746,20 +2901,13 @@
 
   // ---------- LLEGADAS TARDE ----------
   let adminTardanzasCache = null;
-  let adminTardanzasEmpFiltro = ""; // "" = todos los empleados
   const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
                  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
   function openAdminTardanzas() {
-    adminTardanzasEmpFiltro = "";
+    resetFiltro("tard");
     adminShowStep("tardanzas");
     loadAdminTardanzas(false);
-  }
-
-  // Cambio del selector de empleado: re-renderiza filtrando por ese empleado.
-  function onTardanzaFiltro() {
-    adminTardanzasEmpFiltro = document.getElementById("tard-emp-filtro").value;
-    renderAdminTardanzas(adminTardanzasCache || []);
   }
 
   async function loadAdminTardanzas(forzar) {
@@ -2819,22 +2967,28 @@
       el.innerHTML = `<div class="hist-empty">No hay llegadas tarde registradas. 🎉</div>`;
       return;
     }
+    registrarFiltroRender("tard", () => renderAdminTardanzas(adminTardanzasCache || []));
+    const st = filtroState("tard");
 
-    // ---- Selector de empleado: filtra TODO lo de abajo ----
+    // ---- Barra de filtros: empleado + período ----
     const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
-    // Si el filtro apuntaba a alguien que ya no tiene tardanzas, volver a "todos".
-    if (adminTardanzasEmpFiltro && empleados.indexOf(adminTardanzasEmpFiltro) === -1) {
-      adminTardanzasEmpFiltro = "";
-    }
-    const selectorHtml = `
-      <label for="tard-emp-filtro" style="margin-top:0;">Filtrar por empleado</label>
-      <select id="tard-emp-filtro" onchange="onTardanzaFiltro()">
-        <option value="">Todos los empleados</option>
-        ${empleados.map(e => `<option value="${e}"${e === adminTardanzasEmpFiltro ? " selected" : ""}>${e}</option>`).join("")}
-      </select>`;
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const selectorHtml = filtroBarHtml("tard", st, { empleados, meses: mesesDeRecords(recEmp) });
 
-    const filtrado = !!adminTardanzasEmpFiltro;
-    const rec = filtrado ? records.filter(r => r.empleado === adminTardanzasEmpFiltro) : records;
+    const filtrado = !!st.emp;
+
+    // ---- Total desde el inicio (respeta el empleado, ignora el período) ----
+    const totMin = recEmp.reduce((s, r) => s + r.minutos, 0);
+    const totalHtml = `<div class="filtro-total">Total ${filtrado ? st.emp + " · " : ""}desde el inicio: `
+      + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "llegada tarde" : "llegadas tarde"} · <b>${fmtMinutos(totMin)}</b></div>`;
+
+    // ---- Aplicar período para todo lo de abajo ----
+    const rec = filtrarPeriodo(recEmp, st);
+    if (!rec.length) {
+      el.innerHTML = selectorHtml + totalHtml
+        + `<div class="hist-empty">Sin llegadas tarde en ${periodoLabel(st)}.</div>`;
+      return;
+    }
 
     // ---- Resumen mensual: total de tiempo tarde y desglose por empleado ----
     const meses = {};
@@ -2848,7 +3002,7 @@
     });
     const mesesOrd = Object.keys(meses).sort().reverse();
     const resumenHtml = `
-      <div class="section-title" style="margin-top:16px;">Resumen mensual${filtrado ? " · " + adminTardanzasEmpFiltro : ""}</div>
+      <div class="section-title" style="margin-top:16px;">Resumen mensual${filtrado ? " · " + st.emp : ""}</div>
       ${mesesOrd.map(k => {
         const mes = meses[k];
         const emps = Object.keys(mes.emp).sort((a, b) => mes.emp[b].min - mes.emp[a].min);
@@ -2894,7 +3048,7 @@
         </div>`;
       }).join("")}`;
 
-    el.innerHTML = selectorHtml + resumenHtml + detalleHtml;
+    el.innerHTML = selectorHtml + totalHtml + resumenHtml + detalleHtml;
   }
 
   // ---------- LISTA DE SERVICIOS (todos, accesos separados) ----------
@@ -2929,21 +3083,14 @@
   // Muestra todas las fichadas de un servicio a través de todos los empleados,
   // con dirección y empleado. Cache por servicio.
   let adminSGServicio = null;
-  let adminSGEmpFiltro = ""; // "" = todos los empleados
   const adminSGCache = {};
 
   function openAdminServicioGlobal(servicioEnc) {
     adminSGServicio = decodeURIComponent(servicioEnc);
-    adminSGEmpFiltro = "";
+    resetFiltro("sg");
     document.getElementById("admin-sg-title").textContent = adminSGServicio + " · todos los empleados";
     adminShowStep("servicioglobal");
     loadAdminServicioGlobal(false);
-  }
-
-  // Cambio del selector de empleado: re-renderiza filtrando por ese empleado.
-  function onSGFiltro() {
-    adminSGEmpFiltro = document.getElementById("sg-emp-filtro").value;
-    renderAdminServicioGlobal(adminSGCache[adminSGServicio] || []);
   }
 
   async function loadAdminServicioGlobal(forzar) {
@@ -2976,23 +3123,29 @@
       return;
     }
 
-    // Selector de empleado: filtra las fichadas que se muestran abajo.
-    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
-    if (adminSGEmpFiltro && empleados.indexOf(adminSGEmpFiltro) === -1) adminSGEmpFiltro = "";
-    const selectorHtml = `
-      <label for="sg-emp-filtro" style="margin-top:0;">Filtrar por empleado</label>
-      <select id="sg-emp-filtro" onchange="onSGFiltro()">
-        <option value="">Todos los empleados</option>
-        ${empleados.map(e => `<option value="${e}"${e === adminSGEmpFiltro ? " selected" : ""}>${e}</option>`).join("")}
-      </select>`;
+    registrarFiltroRender("sg", () => renderAdminServicioGlobal(adminSGCache[adminSGServicio] || []));
+    const st = filtroState("sg");
 
-    const rec = adminSGEmpFiltro ? records.filter(r => r.empleado === adminSGEmpFiltro) : records;
+    // Barra de filtros: empleado + período.
+    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const selectorHtml = filtroBarHtml("sg", st, { empleados, meses: mesesDeRecords(recEmp) });
+
+    const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}desde el inicio: `
+      + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "registro" : "registros"}</div>`;
+
+    const rec = filtrarPeriodo(recEmp, st);
+    if (!rec.length) {
+      el.innerHTML = selectorHtml + totalHtml
+        + `<div class="hist-empty">Sin fichadas en ${periodoLabel(st)}.</div>`;
+      return;
+    }
 
     const grupos = {};
     rec.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
 
     const fechas = Object.keys(grupos).sort((a, b) => fechaKey(b) - fechaKey(a));
-    el.innerHTML = selectorHtml + fechas.map(fecha => {
+    el.innerHTML = selectorHtml + totalHtml + fechas.map(fecha => {
       const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
       return `
       <div class="hist-day">
@@ -3176,6 +3329,7 @@
   let adminAusenciasCache = null;
 
   function openAdminAusencias() {
+    resetFiltro("aus");
     adminShowStep("ausencias");
     loadAdminAusencias();
   }
@@ -3216,12 +3370,29 @@
 
   function renderAdminAusencias() {
     const el = document.getElementById("admin-ausencias");
-    const recs = adminAusenciasCache || [];
-    if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay faltas registradas. 🎉</div>`; return; }
+    const records = adminAusenciasCache || [];
+    if (!records.length) { el.innerHTML = `<div class="hist-empty">No hay faltas registradas. 🎉</div>`; return; }
+    registrarFiltroRender("aus", renderAdminAusencias);
+    const st = filtroState("aus");
+
+    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const selectorHtml = filtroBarHtml("aus", st, { empleados, meses: mesesDeRecords(recEmp) });
+
+    const sinClasTot = recEmp.filter(r => r.clasificacion !== "Justificada" && r.clasificacion !== "Injustificada").length;
+    const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}desde el inicio: `
+      + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "falta" : "faltas"}${sinClasTot ? ` · <b>${sinClasTot}</b> sin clasificar` : ""}</div>`;
+
+    const recs = filtrarPeriodo(recEmp, st);
+    if (!recs.length) {
+      el.innerHTML = selectorHtml + totalHtml
+        + `<div class="hist-empty">Sin faltas en ${periodoLabel(st)}.</div>`;
+      return;
+    }
     const grupos = {};
     recs.forEach(r => { (grupos[r.empleado] = grupos[r.empleado] || []).push(r); });
     const emps = Object.keys(grupos).sort((a, b) => a.localeCompare(b));
-    el.innerHTML = emps.map(emp => {
+    el.innerHTML = selectorHtml + totalHtml + emps.map(emp => {
       const rs = grupos[emp].slice().sort((a, b) => fechaKey(b.fecha) - fechaKey(a.fecha));
       const sinClas = rs.filter(r => r.clasificacion !== "Justificada" && r.clasificacion !== "Injustificada").length;
       return `
@@ -3249,6 +3420,7 @@
   let adminHorasExtraCache = null;
 
   function openAdminHorasExtra() {
+    resetFiltro("hext");
     adminShowStep("horasextra");
     loadAdminHorasExtra();
   }
@@ -3268,9 +3440,34 @@
 
   function renderAdminHorasExtra() {
     const el = document.getElementById("admin-horas-extra");
-    const recs = adminHorasExtraCache || [];
-    if (!recs.length) { el.innerHTML = `<div class="hist-empty">Sin datos.</div>`; return; }
-    el.innerHTML = recs.map(r => `
+    const records = adminHorasExtraCache || [];
+    if (!records.length) { el.innerHTML = `<div class="hist-empty">Sin datos.</div>`; return; }
+    registrarFiltroRender("hext", renderAdminHorasExtra);
+    const st = filtroState("hext");
+
+    const empleados = records.map(r => r.empleado).sort((a, b) => a.localeCompare(b));
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    // Meses presentes (sobre el empleado ya elegido). Sin rango: los datos son
+    // mensuales, así que el período es "todos" o un mes puntual.
+    const mesesSet = [...new Set(recEmp.flatMap(r => (r.meses || []).map(m => m.mes)))].sort().reverse();
+    const selectorHtml = filtroBarHtml("hext", st, { empleados, meses: mesesSet, rango: false });
+
+    // Total de horas extra desde el inicio (respeta empleado, ignora período).
+    const totExtra = Math.round(recEmp.reduce((s, r) =>
+      s + (r.meses || []).reduce((a, m) => a + (m.overtime || 0), 0), 0) * 10) / 10;
+    const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}horas extra desde el inicio: `
+      + `<b>${totExtra}</b> hs</div>`;
+
+    // Aplica el mes elegido a los meses de cada empleado.
+    const recs = recEmp
+      .map(r => ({ ...r, meses: (r.meses || []).filter(m => st.periodo === "all" || m.mes === st.periodo) }))
+      .filter(r => r.meses.length || st.periodo === "all");
+    if (!recs.length) {
+      el.innerHTML = selectorHtml + totalHtml
+        + `<div class="hist-empty">Sin horas extra en ${periodoLabel(st)}.</div>`;
+      return;
+    }
+    el.innerHTML = selectorHtml + totalHtml + recs.map(r => `
       <div class="hist-day">
         <div class="hist-day-label">${r.empleado} · contrato ${r.contrato} hs/sem</div>
         ${r.meses.length ? r.meses.map(m => {
