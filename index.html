@@ -667,6 +667,7 @@
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminResumen()">📅 Ver todos los ingresos por día</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminTardanzas()">⏰ Llegadas tarde</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminServiciosLista()">📍 Fichadas por servicio</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminServiciosDom()">📇 Servicios y domicilios</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminHorasExtra()">⏱️ Horas extra</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminNovedades()">📄 Planilla de novedades</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminCargarFichada()">✍️ Cargar fichada</button>
@@ -783,6 +784,13 @@
     <div class="section-title" style="margin-top:16px;">Horas extra por empleado</div>
     <button class="btn-refresh" onclick="loadAdminHorasExtra()">🔄 Actualizar</button>
     <div id="admin-horas-extra"></div>
+  </div>
+
+  <!-- SERVICIOS Y DOMICILIOS: planilla de referencia por empleado -->
+  <div id="admin-step-serviciosdom" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Servicios y domicilios</div>
+    <div id="admin-serviciosdom"></div>
   </div>
 
   <!-- PLANILLA DE NOVEDADES: feriados, domingos y horas extra por empleado/mes -->
@@ -2215,6 +2223,7 @@
     document.getElementById("admin-step-ausencias").style.display = step === "ausencias" ? "block" : "none";
     document.getElementById("admin-step-horasextra").style.display = step === "horasextra" ? "block" : "none";
     document.getElementById("admin-step-novedades").style.display = step === "novedades" ? "block" : "none";
+    document.getElementById("admin-step-serviciosdom").style.display = step === "serviciosdom" ? "block" : "none";
     document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
     document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
@@ -3642,6 +3651,96 @@
     const a = document.createElement("a");
     a.href = url;
     a.download = `novedades_${st.emp ? st.emp.replace(/\s+/g, "-") + "_" : ""}${suf}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- SERVICIOS Y DOMICILIOS (admin) ----------
+  // Planilla de referencia: cada empleado con sus servicios, domicilio y
+  // horario (sale de SERVICIOS, config del front). Filtrable por empleado y
+  // descargable como CSV. No pega contra el backend.
+  let servDomEmp = ""; // "" = todos
+
+  function openAdminServiciosDom() {
+    servDomEmp = "";
+    adminShowStep("serviciosdom");
+    renderAdminServiciosDom();
+  }
+
+  function onServDomFiltro() {
+    servDomEmp = document.getElementById("servdom-emp").value;
+    renderAdminServiciosDom();
+  }
+
+  // Domicilio a mostrar: la dirección real, o "Dirección variable" si el
+  // servicio la pide al fichar (custom), o "—" si no hay.
+  function domicilioDe(s) {
+    if (s.dir) return s.dir;
+    return s.custom ? "Dirección variable" : "—";
+  }
+
+  function renderAdminServiciosDom() {
+    const el = document.getElementById("admin-serviciosdom");
+    const empleados = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
+    if (servDomEmp && empleados.indexOf(servDomEmp) === -1) servDomEmp = "";
+
+    const selectorHtml = `
+      <div class="filtro-bar">
+        <label for="servdom-emp">Empleado</label>
+        <select id="servdom-emp" onchange="onServDomFiltro()">
+          <option value="">Todos los empleados</option>
+          ${empleados.map(e => `<option value="${e}"${e === servDomEmp ? " selected" : ""}>${e}</option>`).join("")}
+        </select>
+      </div>`;
+
+    const emps = servDomEmp ? [servDomEmp] : empleados;
+    const totalServ = emps.reduce((n, e) => n + (SERVICIOS[e] || []).length, 0);
+    const totalHtml = `<div class="filtro-total">${emps.length} ${emps.length === 1 ? "empleado" : "empleados"} · `
+      + `<b>${totalServ}</b> ${totalServ === 1 ? "servicio" : "servicios"}</div>`;
+
+    const dlHtml = `<button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarServiciosCSV()">⬇️ Descargar planilla (CSV)</button>`;
+
+    const cuerpo = emps.map(emp => {
+      const servs = (SERVICIOS[emp] || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre));
+      if (!servs.length) {
+        return `
+        <div class="hist-day">
+          <div class="hist-day-label">${emp}</div>
+          <div class="hist-row"><div><div class="hr-hora" style="color:var(--gray);font-weight:600;">Sin servicios asignados</div></div></div>
+        </div>`;
+      }
+      return `
+      <div class="hist-day">
+        <div class="hist-day-label">${emp} · ${servs.length} ${servs.length === 1 ? "servicio" : "servicios"}</div>
+        ${servs.map(s => `
+          <div class="hist-row">
+            <div>
+              <div class="hr-serv">${s.nombre}</div>
+              <div class="hr-hora">📍 ${domicilioDe(s)}</div>
+              ${s.horario ? `<div class="hr-hora" style="color:#4f46e5;font-weight:700;">🕐 ${s.horario.texto}</div>` : ""}
+            </div>
+          </div>`).join("")}
+      </div>`;
+    }).join("");
+
+    el.innerHTML = selectorHtml + totalHtml + dlHtml + cuerpo;
+  }
+
+  function descargarServiciosCSV() {
+    const empleados = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
+    const emps = servDomEmp ? [servDomEmp] : empleados;
+    const rows = [["Empleado", "Servicio", "Domicilio", "Horario"]];
+    emps.forEach(emp => {
+      const servs = (SERVICIOS[emp] || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre));
+      if (!servs.length) { rows.push([emp, "Sin servicios asignados", "", ""]); return; }
+      servs.forEach(s => rows.push([emp, s.nombre, domicilioDe(s), s.horario ? s.horario.texto : ""]));
+    });
+    const csv = "﻿" + rows.map(row => row.map(csvCampo).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `servicios_y_domicilios${servDomEmp ? "_" + servDomEmp.replace(/\s+/g, "-") : ""}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
