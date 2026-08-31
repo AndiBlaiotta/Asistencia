@@ -668,6 +668,7 @@
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminTardanzas()">⏰ Llegadas tarde</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminServiciosLista()">📍 Fichadas por servicio</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminHorasExtra()">⏱️ Horas extra</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminNovedades()">📄 Planilla de novedades</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminCargarFichada()">✍️ Cargar fichada</button>
     </div>
 
@@ -782,6 +783,14 @@
     <div class="section-title" style="margin-top:16px;">Horas extra por empleado</div>
     <button class="btn-refresh" onclick="loadAdminHorasExtra()">🔄 Actualizar</button>
     <div id="admin-horas-extra"></div>
+  </div>
+
+  <!-- PLANILLA DE NOVEDADES: feriados, domingos y horas extra por empleado/mes -->
+  <div id="admin-step-novedades" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Planilla de novedades</div>
+    <button class="btn-refresh" onclick="loadAdminNovedades(true)">🔄 Actualizar</button>
+    <div id="admin-novedades"></div>
   </div>
 
   <!-- FALTAS / AUSENCIAS: detección, motivo del empleado, clasificación -->
@@ -2205,6 +2214,7 @@
     document.getElementById("admin-step-vacaciones").style.display = step === "vacaciones" ? "block" : "none";
     document.getElementById("admin-step-ausencias").style.display = step === "ausencias" ? "block" : "none";
     document.getElementById("admin-step-horasextra").style.display = step === "horasextra" ? "block" : "none";
+    document.getElementById("admin-step-novedades").style.display = step === "novedades" ? "block" : "none";
     document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
     document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
@@ -3487,6 +3497,153 @@
         }).join("")
         : `<div class="hist-empty" style="padding:8px 0;">Sin datos de fichadas.</div>`}
       </div>`).join("");
+  }
+
+  // ---------- PLANILLA DE NOVEDADES (admin) ----------
+  // Detalle por empleado/mes de feriados, domingos y horas extra trabajadas
+  // (día, servicio, entrada→salida, duración) + excedente semanal por mes.
+  // Los que no tienen nada aparecen igual con "Sin novedades". Se puede filtrar
+  // por empleado/período y descargar como CSV (lo que esté filtrado).
+  let adminNovedadesCache = null;
+
+  function openAdminNovedades() {
+    resetFiltro("nov");
+    adminShowStep("novedades");
+    loadAdminNovedades(false);
+  }
+
+  async function loadAdminNovedades(forzar) {
+    const el = document.getElementById("admin-novedades");
+    if (adminNovedadesCache && !forzar) { renderAdminNovedades(); return; }
+    el.innerHTML = `<div class="hist-loading">⏳ Armando la planilla de novedades...</div>`;
+    try {
+      const j = await fetchJson({ action: "adminNovedades", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      adminNovedadesCache = j.records || [];
+      renderAdminNovedades();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  // Minutos desde medianoche -> "HH:MM".
+  function minAHHMM(m) {
+    const h = Math.floor(m / 60), mm = m % 60;
+    return String(h).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+  }
+  // ¿El mes "yyyy-MM" (del excedente) cae dentro del período elegido?
+  function mesEnPeriodo(mes, st) {
+    if (st.periodo === "all") return true;
+    if (st.periodo === "rango") {
+      const dM = st.desde ? st.desde.slice(0, 7) : "0000-00";
+      const hM = st.hasta ? st.hasta.slice(0, 7) : "9999-99";
+      return mes >= dM && mes <= hM;
+    }
+    return mes === st.periodo;
+  }
+  // Días + excedente de un empleado, ya recortados al período elegido.
+  function novedadesFiltradas(r, st) {
+    return {
+      dias:      filtrarPeriodo(r.dias || [], st),
+      excedente: (r.excedente || []).filter(e => mesEnPeriodo(e.mes, st))
+    };
+  }
+
+  function renderAdminNovedades() {
+    const el = document.getElementById("admin-novedades");
+    const records = adminNovedadesCache || [];
+    if (!records.length) { el.innerHTML = `<div class="hist-empty">Sin datos.</div>`; return; }
+    registrarFiltroRender("nov", renderAdminNovedades);
+    const st = filtroState("nov");
+
+    const empleados = records.map(r => r.empleado).sort((a, b) => a.localeCompare(b));
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const mesesSet = [...new Set(recEmp.flatMap(r =>
+      [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes)]))]
+      .filter(k => k && k !== "0000-00").sort().reverse();
+    const barHtml = filtroBarHtml("nov", st, { empleados, meses: mesesSet });
+    const dlHtml = `<button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarNovedadesCSV()">⬇️ Descargar planilla (CSV)</button>`;
+
+    const cuerpo = recEmp.map(r => {
+      const nf = novedadesFiltradas(r, st);
+      if (!nf.dias.length && !nf.excedente.length) {
+        return `
+        <div class="hist-day">
+          <div class="hist-day-label">${r.empleado}</div>
+          <div class="hist-row"><div><div class="hr-hora" style="color:var(--gray);font-weight:600;">Sin novedades</div></div></div>
+        </div>`;
+      }
+      const filasDias = nf.dias.map(d => {
+        const badge = d.tipo === "Feriado" ? "badge-tarde"
+                    : d.tipo === "Domingo" ? "badge-comprado" : "badge-salida";
+        return `
+        <div class="hist-row salida">
+          <div>
+            <div class="hr-serv">${diaSemanaNombre(d.fecha)} ${d.fecha} · ${d.servicio}</div>
+            <div class="hr-hora">🕐 ${minAHHMM(d.desde)}–${minAHHMM(d.hasta)} · ${fmtMinutos(d.minutos)}</div>
+          </div>
+          <span class="badge ${badge}">${d.tipo}</span>
+        </div>`;
+      }).join("");
+      const filasEx = nf.excedente.map(e => `
+        <div class="hist-row">
+          <div>
+            <div class="hr-serv">Excedente semanal · ${mesLabel(e.mes)}</div>
+            <div class="hr-hora">por encima del contrato (${r.contrato} hs/sem) · sin horario</div>
+          </div>
+          <span class="badge badge-entrada">${e.horas} hs</span>
+        </div>`).join("");
+      return `
+        <div class="hist-day">
+          <div class="hist-day-label">${r.empleado}</div>
+          ${filasDias}${filasEx}
+        </div>`;
+    }).join("");
+
+    el.innerHTML = barHtml + dlHtml + cuerpo;
+  }
+
+  // Un campo CSV: entre comillas solo si hace falta (coma, comilla o salto).
+  function csvCampo(v) {
+    v = (v == null ? "" : String(v));
+    return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+
+  // Descarga la planilla filtrada (empleado + período) como CSV con BOM para
+  // que Excel/Google Sheets respeten los acentos. Un empleado sin novedades en
+  // el período sale igual con "Sin novedades".
+  function descargarNovedadesCSV() {
+    const records = adminNovedadesCache || [];
+    const st = filtroState("nov");
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const dec = min => Math.round(min / 60 * 100) / 100; // horas decimales (punto)
+    const rows = [["Empleado", "Mes", "Fecha", "Día", "Tipo", "Servicio", "Desde", "Hasta", "Tiempo", "Horas"]];
+    recEmp.forEach(r => {
+      const nf = novedadesFiltradas(r, st);
+      if (!nf.dias.length && !nf.excedente.length) {
+        rows.push([r.empleado, "", "", "", "Sin novedades", "", "", "", "", ""]);
+        return;
+      }
+      nf.dias.forEach(d => rows.push([
+        r.empleado, mesLabel(mesKey(d.fecha)), d.fecha, diaSemanaNombre(d.fecha),
+        d.tipo, d.servicio, minAHHMM(d.desde), minAHHMM(d.hasta), fmtMinutos(d.minutos), dec(d.minutos)
+      ]));
+      nf.excedente.forEach(e => rows.push([
+        r.empleado, mesLabel(e.mes), "", "", "Excedente semanal", "", "", "",
+        fmtMinutos(e.horas * 60), e.horas
+      ]));
+    });
+    const csv = "﻿" + rows.map(row => row.map(csvCampo).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const suf = st.periodo === "all" ? "todos"
+              : st.periodo === "rango" ? `${st.desde || "inicio"}_a_${st.hasta || "hoy"}`
+              : st.periodo;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `novedades_${st.emp ? st.emp.replace(/\s+/g, "-") + "_" : ""}${suf}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // ---------- CARGAR FICHADA (acceso directo, admin) ----------

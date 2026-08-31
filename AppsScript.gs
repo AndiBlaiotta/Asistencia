@@ -1060,6 +1060,112 @@ function horasExtraDe(empleado) {
   }));
 }
 
+// ---- Novedades por empleado (para la planilla mensual) ----
+// Detalle DÍA POR DÍA de lo que cuenta como extra, con entrada→salida real:
+//  - "Feriado": trabajó un feriado nacional (cualquier servicio).
+//  - "Domingo": trabajó un domingo no feriado (cualquier servicio).
+//  - "Horas extra": fichó en un servicio libre ("Horas Extras"/"Suplencias")
+//    en un día normal.
+// Cada fila trae fecha, servicio, desde/hasta (minutos desde medianoche) y
+// duración en minutos. Un día con varias entrada/salida da varias filas.
+// Aparte, `excedente` = por mes, las horas trabajadas por ENCIMA del contrato
+// semanal (parte semanal, SIN feriado/domingo, que ya van como filas de día);
+// no tiene hora desde/hasta (es un neto semanal). Lee toda la hoja (todos los
+// meses). Los empleados sin nada devuelven listas vacías (= "sin novedades").
+function novedadesDe(empleado) {
+  const servHor = HORARIOS[empleado] || {};
+  const contrato = horasContratoSemanal(empleado);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(empleado);
+  if (!sheet || sheet.getLastRow() <= 1) return { dias: [], excedente: [] };
+  const tz = Session.getScriptTimeZone();
+
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  const weekWorked = {};   // wkInt -> minutos (días normales: regular programado + libre real)
+  const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
+  const especiales = {};   // "tipo|servicio|fi" -> { fecha, fi, servicio, tipo, mes, ent:[], sal:[] }
+  const libres     = {};   // "servicio|fi" -> { fecha, fi, servicio, mes, wk, ent:[], sal:[] }
+
+  data.forEach(row => {
+    const fechaStr = fmtCell(row[0]);
+    const fi = fechaAInt(fechaStr);
+    if (isNaN(fi)) return;
+    const servicio = (row[1] || "").toString();
+    const tipo     = (row[3] || "").toString();
+    const dObj = fechaADate(fechaStr);
+    if (!dObj) return;
+    const dow   = dObj.getDay();
+    const lunes = lunesDeSemana(dObj);
+    const wk    = lunes.getFullYear() * 10000 + (lunes.getMonth() + 1) * 100 + lunes.getDate();
+    const mesF  = Utilities.formatDate(dObj, tz, "yyyy-MM");
+    weekMonth[wk] = Utilities.formatDate(lunes, tz, "yyyy-MM");
+    const hm = horaAMin(fmtCell(row[4]));
+
+    // Domingo o feriado: todo lo del día es novedad (duración real).
+    const feriado = esFeriado(fi);
+    if (feriado || dow === 0) {
+      const t = feriado ? "Feriado" : "Domingo";
+      const key = t + "|" + servicio + "|" + fi;
+      const s = especiales[key] || (especiales[key] =
+        { fecha: fechaStr, fi, servicio, tipo: t, mes: mesF, ent: [], sal: [] });
+      if (!isNaN(hm)) (tipo === "Entrada" ? s.ent : s.sal).push(hm);
+      return;
+    }
+
+    if (servHor[servicio]) {
+      // Regular: al fichar entrada, cuenta la duración programada (para excedente).
+      if (tipo === "Entrada" && servHor[servicio][dow]) {
+        const dur = horaAMin(servHor[servicio][dow][1]) - horaAMin(servHor[servicio][dow][0]);
+        if (!isNaN(dur) && dur > 0) weekWorked[wk] = (weekWorked[wk] || 0) + dur;
+      }
+    } else if (SERVICIOS_LIBRES.indexOf(servicio) !== -1) {
+      const key = servicio + "|" + fi;
+      const e = libres[key] || (libres[key] =
+        { fecha: fechaStr, fi, servicio, mes: mesF, wk, ent: [], sal: [] });
+      if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
+    }
+  });
+
+  const dias = [];
+  // Libres (día normal) -> filas "Horas extra"; su duración real suma al excedente.
+  Object.keys(libres).forEach(k => {
+    const e = libres[k];
+    e.ent.sort((a, b) => a - b); e.sal.sort((a, b) => a - b);
+    const n = Math.min(e.ent.length, e.sal.length);
+    for (let i = 0; i < n; i++) {
+      const dur = e.sal[i] - e.ent[i];
+      if (dur > 0) {
+        weekWorked[e.wk] = (weekWorked[e.wk] || 0) + dur;
+        dias.push({ mes: e.mes, fecha: e.fecha, fi: e.fi, servicio: e.servicio,
+                    tipo: "Horas extra", desde: e.ent[i], hasta: e.sal[i], minutos: dur });
+      }
+    }
+  });
+  // Feriado/domingo -> filas de día.
+  Object.keys(especiales).forEach(k => {
+    const s = especiales[k];
+    s.ent.sort((a, b) => a - b); s.sal.sort((a, b) => a - b);
+    const n = Math.min(s.ent.length, s.sal.length);
+    for (let i = 0; i < n; i++) {
+      const dur = s.sal[i] - s.ent[i];
+      if (dur > 0) dias.push({ mes: s.mes, fecha: s.fecha, fi: s.fi, servicio: s.servicio,
+                               tipo: s.tipo, desde: s.ent[i], hasta: s.sal[i], minutos: dur });
+    }
+  });
+  dias.sort((a, b) => a.fi - b.fi || a.desde - b.desde);
+
+  // Excedente semanal por mes (parte sobre contrato; sin feriado/domingo).
+  const exMes = {};
+  Object.keys(weekWorked).forEach(wk => {
+    const over = Math.max(0, weekWorked[wk] / 60 - contrato);
+    if (over > 0) exMes[weekMonth[wk]] = (exMes[weekMonth[wk]] || 0) + over;
+  });
+  const r1 = x => Math.round(x * 10) / 10;
+  const excedente = Object.keys(exMes).sort().map(m => ({ mes: m, horas: r1(exMes[m]) }));
+
+  return { dias, excedente };
+}
+
 // Conjunto de nombres de servicio válidos: los reales (todos figuran en
 // HORARIOS) + los libres (Horas Extras / Suplencias). Sirve para validar el
 // parámetro `servicio` de adminServicioGlobal contra una lista conocida.
@@ -1181,6 +1287,25 @@ function doGet(e) {
         contrato: horasContratoSemanal(e),
         meses:    horasExtraDe(e)
       }));
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- NOVEDADES: planilla mensual con el detalle día por día de feriados,
+  // domingos y horas extra trabajadas (entrada→salida, servicio) + excedente
+  // semanal por mes. Un empleado sin nada igual aparece (dias/excedente vacíos
+  // = "sin novedades" en el front). Solo admins. ----
+  if (p.action === "adminNovedades") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const records = EMPLEADOS.map(e => {
+        const n = novedadesDe(e);
+        return { empleado: e, contrato: horasContratoSemanal(e), dias: n.dias, excedente: n.excedente };
+      });
       return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
