@@ -922,6 +922,18 @@
   </div>
 </div>
 
+<!-- ==================== MODAL: MES PARA LA PLANILLA DE NOVEDADES ==================== -->
+<div id="modal-mes-nov" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-title" style="color:var(--cyan);">📄 Descargar planilla</div>
+    <div class="modal-sub" id="modal-mes-nov-sub"></div>
+    <label for="modal-mes-nov-sel">¿De qué mes necesitás las novedades?</label>
+    <select id="modal-mes-nov-sel"></select>
+    <button class="btn btn-primary" style="margin-top:14px;" onclick="confirmarDescargaNovedades()">⬇️ Descargar CSV</button>
+    <button class="btn btn-cambiar" onclick="cerrarDescargaNovedades()">Cancelar</button>
+  </div>
+</div>
+
 <script>
   // ============================================================
   // ✏️  PEGÁ TU URL DEL APPS SCRIPT AQUÍ:
@@ -3571,7 +3583,7 @@
       [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes)]))]
       .filter(k => k && k !== "0000-00").sort().reverse();
     const barHtml = filtroBarHtml("nov", st, { empleados, meses: mesesSet });
-    const dlHtml = `<button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarNovedadesCSV()">⬇️ Descargar planilla (CSV)</button>`;
+    const dlHtml = `<button class="btn btn-primary" style="margin-bottom:12px;" onclick="abrirDescargaNovedades()">⬇️ Descargar planilla (CSV)</button>`;
 
     const cuerpo = recEmp.map(r => {
       const nf = novedadesFiltradas(r, st);
@@ -3618,12 +3630,38 @@
     return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
 
-  // Descarga la planilla filtrada (empleado + período) como CSV con BOM para
-  // que Excel/Google Sheets respeten los acentos. Un empleado sin novedades en
-  // el período sale igual con "Sin novedades".
-  function descargarNovedadesCSV() {
+  // Abre el modal que pregunta de qué mes bajar la planilla (más preciso para
+  // el pase). Mantiene el empleado ya filtrado y solo cambia el mes. Preselecciona
+  // el mes del filtro actual si hay uno, si no el más reciente con datos.
+  function abrirDescargaNovedades() {
     const records = adminNovedadesCache || [];
     const st = filtroState("nov");
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const meses = [...new Set(recEmp.flatMap(r =>
+      [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes)]))]
+      .filter(k => k && k !== "0000-00").sort().reverse();
+    const pre = (st.periodo !== "all" && st.periodo !== "rango") ? st.periodo : (meses[0] || "all");
+    const sel = document.getElementById("modal-mes-nov-sel");
+    sel.innerHTML = meses.map(k => `<option value="${k}"${k === pre ? " selected" : ""}>${mesLabel(k)}</option>`).join("")
+      + `<option value="all"${pre === "all" ? " selected" : ""}>Todos los meses (desde el inicio)</option>`;
+    document.getElementById("modal-mes-nov-sub").textContent = st.emp ? st.emp : "Todos los empleados";
+    document.getElementById("modal-mes-nov").style.display = "flex";
+  }
+  function cerrarDescargaNovedades() {
+    document.getElementById("modal-mes-nov").style.display = "none";
+  }
+  // Confirma el mes elegido y baja el CSV de ese mes (respetando el empleado).
+  function confirmarDescargaNovedades() {
+    const mes = document.getElementById("modal-mes-nov-sel").value;
+    cerrarDescargaNovedades();
+    exportarNovedadesCSV({ emp: filtroState("nov").emp, periodo: mes, desde: "", hasta: "" });
+  }
+
+  // Genera y descarga la planilla como CSV con BOM para que Excel/Google Sheets
+  // respeten los acentos. Un empleado sin novedades en el período sale igual con
+  // "Sin novedades". `st` = { emp, periodo, desde, hasta }.
+  function exportarNovedadesCSV(st) {
+    const records = adminNovedadesCache || [];
     const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
     const dec = min => Math.round(min / 60 * 100) / 100; // horas decimales (punto)
     const rows = [["Empleado", "Mes", "Fecha", "Día", "Tipo", "Servicio", "Desde", "Hasta", "Tiempo", "Horas"]];
