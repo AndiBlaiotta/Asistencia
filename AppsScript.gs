@@ -39,7 +39,8 @@ const HEADERS = [
 // Hojas que NO son de empleados (no llevan fichadas): se saltean al recorrer
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
-                           "Vacaciones", "Coberturas", "Ausencias", "Permisos"];
+                           "Vacaciones", "Coberturas", "Ausencias", "Permisos",
+                           "Tiempo Extra"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -92,6 +93,22 @@ const AUSENCIAS_HEADERS = ["ID", "Empleado", "Fecha", "Servicio", "Motivo", "Cla
 const AUSENCIAS_DESDE = "05/08/2026";
 // Ventana máxima hacia atrás (días) que se revisa en cada detección.
 const AUSENCIAS_LOOKBACK_DIAS = 60;
+
+// ---- Tiempo extra por fichada (salida más allá de la duración asignada) ----
+// Al marcar la SALIDA de un servicio regular, si (salida − entrada) supera la
+// duración programada del turno por al menos TIEMPO_EXTRA_MIN minutos, se
+// registra un "Tiempo extra" en estado Pendiente. El admin lo Aprueba (entra en
+// la planilla de novedades) o lo Anula. Distinto del reporte semanal
+// horasExtraDe/novedadesDe (excedente sobre contrato), que sigue automático.
+const TIEMPO_EXTRA_SHEET   = "Tiempo Extra";
+const TIEMPO_EXTRA_HEADERS = ["ID", "Empleado", "Fecha", "Servicio", "Entrada", "Salida", "Minutos", "Estado", "Detectada", "Resuelto"];
+const TIEMPO_EXTRA_MIN     = 30; // umbral mínimo (min) para contar tiempo extra
+// Desde cuándo se empieza a contabilizar (dd/MM/yyyy): las salidas anteriores se
+// ignoran (no se registra tiempo extra viejo).
+const TIEMPO_EXTRA_DESDE   = "01/09/2026";
+// Mientras se valida, el tiempo extra SOLO lo ven los administradores. Al ponerlo
+// en true, el empleado también lo ve (badge en su historial + aviso al fichar).
+const TIEMPO_EXTRA_VISIBLE_EMPLEADO = false;
 
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
 const PRODUCTOS = [
@@ -1166,6 +1183,96 @@ function novedadesDe(empleado) {
   return { dias, excedente };
 }
 
+// ---- Tiempo extra por fichada ----
+// Hoja donde vive el tiempo extra detectado en las salidas (una fila por
+// evento, con su estado de aprobación). Se crea sola la primera vez.
+function getTiempoExtraSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(TIEMPO_EXTRA_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(TIEMPO_EXTRA_SHEET);
+    sheet.appendRow(TIEMPO_EXTRA_HEADERS);
+    sheet.getRange(1, 1, 1, TIEMPO_EXTRA_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+// Registra el tiempo extra de una salida si supera el umbral. `minutos` ya viene
+// calculado = (salida − entrada) − duración asignada. Idempotente por
+// empleado+fecha+servicio (un servicio regular ficha una vez por día): si ya hay
+// una fila para esa combinación no-Anulada, no duplica. Devuelve los minutos
+// registrados (0 si no aplica).
+function registrarTiempoExtra(empleado, fecha, servicio, horaEntrada, horaSalida, minutos) {
+  if (isNaN(minutos) || minutos < TIEMPO_EXTRA_MIN) return 0;
+  // No contabilizar salidas anteriores a la fecha de arranque.
+  const fi = fechaAInt(fecha), desde = fechaAInt(TIEMPO_EXTRA_DESDE);
+  if (!isNaN(fi) && !isNaN(desde) && fi < desde) return 0;
+  const sheet = getTiempoExtraSheet();
+  const last = sheet.getLastRow();
+  if (last > 1) {
+    const rows = sheet.getRange(2, 1, last - 1, TIEMPO_EXTRA_HEADERS.length).getValues();
+    const dup = rows.some(r =>
+      (r[1] || "").toString() === empleado &&
+      (r[2] || "").toString() === fecha &&
+      (r[3] || "").toString() === servicio &&
+      (r[7] || "").toString() !== "Anulada");
+    if (dup) return 0;
+  }
+  const tz  = Session.getScriptTimeZone();
+  const now = Utilities.formatDate(new Date(), tz, "dd/MM/yyyy HH:mm");
+  // Formato de texto ANTES de escribir (como en Ausencias) para que Sheets no
+  // autoconvierta fecha/horas a su tipo Date interno (rompería el join y la vista).
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, 1, TIEMPO_EXTRA_HEADERS.length).setNumberFormat("@").setValues([[
+    Utilities.getUuid().slice(0, 8), empleado, fecha, servicio,
+    horaEntrada, horaSalida, minutos, "Pendiente", now, ""
+  ]]);
+  return minutos;
+}
+
+// Mapa "fecha|servicio" -> { minutos, estado } del tiempo extra NO anulado de un
+// empleado. Sirve para pintar el badge amarillo en el historial de fichadas.
+function tiempoExtraMap(empleado) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(TIEMPO_EXTRA_SHEET);
+  const map = {};
+  if (!sheet || sheet.getLastRow() <= 1) return map;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, TIEMPO_EXTRA_HEADERS.length).getValues();
+  rows.forEach(r => {
+    if ((r[1] || "").toString() !== empleado) return;
+    const estado = (r[7] || "").toString();
+    if (estado === "Anulada") return;
+    map[fmtCell(r[2]) + "|" + (r[3] || "")] = { minutos: Number(r[6]) || 0, estado };
+  });
+  return map;
+}
+
+// Tiempo extra APROBADO de un empleado, agrupado por mes, para las novedades.
+// Devuelve [{ mes, fecha, servicio, minutos }] ordenado por fecha.
+function tiempoExtraAprobadoDe(empleado) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(TIEMPO_EXTRA_SHEET);
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, TIEMPO_EXTRA_HEADERS.length).getValues();
+  const out = [];
+  rows.forEach(r => {
+    if ((r[1] || "").toString() !== empleado) return;
+    if ((r[7] || "").toString() !== "Aprobada") return;
+    const fechaStr = fmtCell(r[2]).toString();
+    const dObj = fechaADate(fechaStr);
+    if (!dObj) return;
+    out.push({
+      mes: Utilities.formatDate(dObj, Session.getScriptTimeZone(), "yyyy-MM"),
+      fecha: fechaStr, fi: fechaAInt(fechaStr),
+      servicio: (r[3] || "").toString(), minutos: Number(r[6]) || 0
+    });
+  });
+  out.sort((a, b) => (a.fi || 0) - (b.fi || 0));
+  return out;
+}
+
 // Conjunto de nombres de servicio válidos: los reales (todos figuran en
 // HORARIOS) + los libres (Horas Extras / Suplencias). Sirve para validar el
 // parámetro `servicio` de adminServicioGlobal contra una lista conocida.
@@ -1235,11 +1342,13 @@ function doGet(e) {
         return jsonOut({ status: "ok", records: [] });
       }
       const data = sheet.getDataRange().getValues();
+      const extraMap = tiempoExtraMap(p.empleado);
       // `fila` = nº de fila real en la hoja (para poder anular). El elemento i
       // de data.slice(1) es la fila i+2. Se mapea antes de invertir el orden.
       const records = data.slice(1).map((row, i) => {
         const lat = row[5], lon = row[6];
         const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+        const extra = (row[3] === "Salida") ? extraMap[fmtCell(row[0]) + "|" + row[1]] : null;
         return {
           fila:      i + 2,
           fecha:     fmtCell(row[0]),
@@ -1251,7 +1360,8 @@ function doGet(e) {
           lon:       lon,
           linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
           estado:    row[9] || "",
-          motivo:    (row[10] || "").toString()
+          motivo:    (row[10] || "").toString(),
+          extra:     extra || null
         };
       }).reverse();
       return jsonOut({ status: "ok", records });
@@ -1304,7 +1414,8 @@ function doGet(e) {
     try {
       const records = EMPLEADOS.map(e => {
         const n = novedadesDe(e);
-        return { empleado: e, contrato: horasContratoSemanal(e), dias: n.dias, excedente: n.excedente };
+        return { empleado: e, contrato: horasContratoSemanal(e), dias: n.dias,
+                 excedente: n.excedente, tiempoExtra: tiempoExtraAprobadoDe(e) };
       });
       return jsonOut({ status: "ok", records });
     } catch (err) {
@@ -1542,6 +1653,8 @@ function doGet(e) {
       }
 
       const data = sheet.getDataRange().getValues();
+      // Mientras se valida, el tiempo extra solo lo ven los admins (no el empleado).
+      const extraMap = TIEMPO_EXTRA_VISIBLE_EMPLEADO ? tiempoExtraMap(empleado) : {};
       const records = data.slice(1).reverse().map(row => ({
         fecha:    fmtCell(row[0]),
         servicio: row[1],
@@ -1551,7 +1664,8 @@ function doGet(e) {
         lon:      row[6],
         linkGPS:  typeof row[7] === "string" ? row[7] : (row[5] && row[6] ? `https://www.google.com/maps?q=${row[5]},${row[6]}` : "No disponible"),
         estado:   row[9] || "",
-        motivo:   (row[10] || "").toString()
+        motivo:   (row[10] || "").toString(),
+        extra:    (row[3] === "Salida") ? (extraMap[fmtCell(row[0]) + "|" + row[1]] || null) : null
       }));
 
       return jsonOut({ status: "ok", records });
@@ -2175,6 +2289,49 @@ function doGet(e) {
     }
   }
 
+  // ---- ADMIN: listar el tiempo extra detectado (todos los estados) ----
+  if (p.action === "adminTiempoExtra") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getTiempoExtraSheet();
+      if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, TIEMPO_EXTRA_HEADERS.length).getValues();
+      const records = data.map(r => ({
+        id: r[0], empleado: r[1], fecha: fmtCell(r[2]), servicio: r[3],
+        entrada: fmtCell(r[4]), salida: fmtCell(r[5]), minutos: Number(r[6]) || 0, estado: r[7]
+      })).reverse();
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: aprobar / anular / re-pendientizar un tiempo extra ----
+  if (p.action === "resolverTiempoExtra" && p.id && p.estado) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (["Aprobada", "Anulada", "Pendiente"].indexOf(p.estado) === -1) {
+      return jsonOut({ status: "error", message: "Estado inválido" });
+    }
+    try {
+      const sheet = getTiempoExtraSheet();
+      const last = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "Registro no encontrado" });
+      const ids = sheet.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "Registro no encontrado" });
+      sheet.getRange(idx + 2, 8).setValue(p.estado);
+      sheet.getRange(idx + 2, 10).setNumberFormat("@")
+        .setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"));
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- REGISTRAR ENTRADA/SALIDA ----
   if (p.empleado) {
     if (!checkAuth(p.empleado, p.hash)) {
@@ -2307,7 +2464,23 @@ function doGet(e) {
         rowRange.setBackground("#fef2f2");
       }
 
-      return jsonOut({ status: "ok" });
+      // ---- Tiempo extra: al cerrar la salida de un servicio regular, si la
+      // permanencia real (salida − entrada) superó la duración asignada del
+      // turno por al menos TIEMPO_EXTRA_MIN, se registra Pendiente de aprobación.
+      let extraMin = 0;
+      if (tipo === "Salida") {
+        const rango = ((HORARIOS[empHor] || {})[servicio] || {})[diaDeSemana(fecha)];
+        if (rango && entradaMin != null && !isNaN(entradaMin)) {
+          const salidaMin = horaAMin(hora);
+          const durProg   = horaAMin(rango[1]) - horaAMin(rango[0]);
+          if (!isNaN(salidaMin) && !isNaN(durProg) && durProg > 0) {
+            const dif = (salidaMin - entradaMin) - durProg;
+            extraMin = registrarTiempoExtra(empleado, fecha, servicio, ultima.hora, hora, dif);
+          }
+        }
+      }
+
+      return jsonOut({ status: "ok", extra: TIEMPO_EXTRA_VISIBLE_EMPLEADO ? extraMin : 0 });
 
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });

@@ -261,6 +261,7 @@
     .badge-entrada  { background: #dcfce7; color: #16a34a; }
     .badge-salida   { background: #fee2e2; color: #dc2626; }
     .badge-tarde    { background: #fef3c7; color: #b45309; }
+    .badge-extra    { background: #fde047; color: #854d0e; }
     .badge-comprado { background: #dbeafe; color: #2563eb; }
     .badge-sinasignar { background: #e5e7eb; color: #4b5563; }
 
@@ -683,6 +684,7 @@
     <div id="grp-licencias" class="admin-group" style="display:none;">
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminVacaciones()">🏖️ Licencias, permisos y suplencias</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminAusencias()">🚫 Faltas / Ausencias</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminTiempoExtra()">⏱️ Tiempo extra a aprobar</button>
     </div>
 
     <!-- Horas asignadas (directo) -->
@@ -807,6 +809,14 @@
     <div class="section-title" style="margin-top:16px;">Faltas / Ausencias</div>
     <button class="btn-refresh" onclick="loadAdminAusencias()">🔄 Actualizar</button>
     <div id="admin-ausencias"></div>
+  </div>
+
+  <!-- TIEMPO EXTRA: aprobar/anular el tiempo extra detectado en las salidas -->
+  <div id="admin-step-tiempoextra" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Tiempo extra</div>
+    <button class="btn-refresh" onclick="loadAdminTiempoExtra()">🔄 Actualizar</button>
+    <div id="admin-tiempoextra"></div>
   </div>
 
   <!-- VACACIONES: solicitudes, aprobación y asignación de suplentes -->
@@ -1687,6 +1697,11 @@
         msgEl.className = "error";
         msgEl.style.color = "#b45309";
         msgEl.textContent = `⚠️ ${tipo} registrada en ${record.servicio} a las ${record.hora} — quedó marcada TARDE (${estado.replace("Tarde ", "")})`;
+      } else if (json.extra > 0) {
+        // Salida con tiempo extra detectado (queda pendiente de aprobación).
+        msgEl.className = "";
+        msgEl.style.color = "#854d0e";
+        msgEl.textContent = `✅ ${tipo} registrada en ${record.servicio} a las ${record.hora} — ⏱️ +${json.extra} min de tiempo extra (pendiente de aprobación)`;
       } else {
         msgEl.textContent = `✅ ${tipo} registrada en ${record.servicio} a las ${record.hora}`;
       }
@@ -1838,6 +1853,19 @@
   // Etiqueta con ícono para cada tipo de permiso de un día.
   function tipoPermisoLabel(tipo) {
     return tipo === "Retiro anticipado" ? "🚪 Retiro anticipado" : "🕘 Llegada más tarde";
+  }
+
+  // Badge amarillo de tiempo extra en una fila de fichada (salida). `extra`
+  // viene del backend: { minutos, estado }. Pendiente = amarillo lleno;
+  // Aprobada = verde con ✅. Las Anuladas no llegan (se filtran server-side).
+  function extraBadge(extra) {
+    if (!extra || !extra.minutos) return "";
+    const h = Math.floor(extra.minutos / 60), m = extra.minutos % 60;
+    const txt = h > 0 ? `${h}h ${m}min` : `${m} min`;
+    if (extra.estado === "Aprobada") {
+      return `<br><span class="badge badge-entrada" style="margin-top:4px;display:inline-block;">⏱️ +${txt} extra ✅</span>`;
+    }
+    return `<br><span class="badge badge-extra" style="margin-top:4px;display:inline-block;">⏱️ +${txt} extra</span>`;
   }
 
   // Badge de estado de una solicitud (compartido empleado/admin).
@@ -2008,6 +2036,7 @@
                 ${r.estado && r.estado.startsWith('Tarde')
                   ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
                   : ''}
+                ${extraBadge(r.extra)}
                 ${r.linkGPS && r.linkGPS !== 'No disponible'
                   ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                   : ''}
@@ -2233,6 +2262,7 @@
     document.getElementById("admin-step-servicioslista").style.display = step === "servicioslista" ? "block" : "none";
     document.getElementById("admin-step-vacaciones").style.display = step === "vacaciones" ? "block" : "none";
     document.getElementById("admin-step-ausencias").style.display = step === "ausencias" ? "block" : "none";
+    document.getElementById("admin-step-tiempoextra").style.display = step === "tiempoextra" ? "block" : "none";
     document.getElementById("admin-step-horasextra").style.display = step === "horasextra" ? "block" : "none";
     document.getElementById("admin-step-novedades").style.display = step === "novedades" ? "block" : "none";
     document.getElementById("admin-step-serviciosdom").style.display = step === "serviciosdom" ? "block" : "none";
@@ -2733,6 +2763,7 @@
               ${r.estado && r.estado.startsWith("Tarde")
                 ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
                 : ``}
+              ${extraBadge(r.extra)}
               ${r.linkGPS && r.linkGPS !== "No disponible"
                 ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
                 : ``}
@@ -3447,6 +3478,94 @@
     loadAdminAusencias();
   }
 
+  // ---------- TIEMPO EXTRA (admin) ----------
+  // Aprueba/anula el tiempo extra detectado al cerrar una salida. Solo lo
+  // Aprobado entra en la planilla de novedades.
+  let adminTiempoExtraCache = null;
+
+  function openAdminTiempoExtra() {
+    resetFiltro("text");
+    adminShowStep("tiempoextra");
+    loadAdminTiempoExtra();
+  }
+
+  async function loadAdminTiempoExtra() {
+    const el = document.getElementById("admin-tiempoextra");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando tiempo extra...</div>`;
+    try {
+      const j = await fetchJson({ action: "adminTiempoExtra", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      adminTiempoExtraCache = j.records || [];
+      renderAdminTiempoExtra();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function teBadge(estado) {
+    if (estado === "Aprobada") return `<span class="badge badge-entrada">✅ Aprobada</span>`;
+    if (estado === "Anulada")  return `<span class="badge badge-salida">Anulada</span>`;
+    return `<span class="badge badge-extra">⏳ Pendiente</span>`;
+  }
+
+  function renderTeRow(r) {
+    const acciones = r.estado === "Aprobada"
+      ? `<button class="btn-mini btn-anular" onclick="resolverTE('${r.id}','Anulada')">🗑️ Anular</button>`
+      : r.estado === "Anulada"
+      ? `<button class="btn-mini btn-recibido" onclick="resolverTE('${r.id}','Aprobada')">✅ Aprobar</button>`
+      : `<button class="btn-mini btn-recibido" onclick="resolverTE('${r.id}','Aprobada')">✅ Aprobar</button>
+         <button class="btn-mini btn-anular" onclick="resolverTE('${r.id}','Anulada')">🗑️ Anular</button>`;
+    return `<div class="mat-item" style="flex-direction:column;align-items:stretch;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div><div class="mat-nombre">${r.fecha} · ${r.servicio}</div>
+             <div class="mat-fecha">${r.entrada} → ${r.salida} · <b>+${fmtMinutos(r.minutos)}</b> extra</div></div>
+        ${teBadge(r.estado)}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${acciones}</div>
+    </div>`;
+  }
+
+  function renderAdminTiempoExtra() {
+    const el = document.getElementById("admin-tiempoextra");
+    const records = adminTiempoExtraCache || [];
+    if (!records.length) { el.innerHTML = `<div class="hist-empty">No hay tiempo extra registrado.</div>`; return; }
+    registrarFiltroRender("text", renderAdminTiempoExtra);
+    const st = filtroState("text");
+
+    const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
+    const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
+    const selectorHtml = filtroBarHtml("text", st, { empleados, meses: mesesDeRecords(recEmp) });
+
+    const pendTot = recEmp.filter(r => r.estado === "Pendiente").length;
+    const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}`
+      + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "registro" : "registros"}${pendTot ? ` · <b>${pendTot}</b> pendiente${pendTot === 1 ? "" : "s"}` : ""}</div>`;
+
+    const recs = filtrarPeriodo(recEmp, st);
+    if (!recs.length) {
+      el.innerHTML = selectorHtml + totalHtml + `<div class="hist-empty">Sin tiempo extra en ${periodoLabel(st)}.</div>`;
+      return;
+    }
+    const grupos = {};
+    recs.forEach(r => { (grupos[r.empleado] = grupos[r.empleado] || []).push(r); });
+    const emps = Object.keys(grupos).sort((a, b) => a.localeCompare(b));
+    el.innerHTML = selectorHtml + totalHtml + emps.map(emp => {
+      const rs = grupos[emp].slice().sort((a, b) => fechaKey(b.fecha) - fechaKey(a.fecha));
+      const pend = rs.filter(r => r.estado === "Pendiente").length;
+      return `
+      <div class="hist-day">
+        <div class="hist-day-label">${emp} · ${rs.length} ${rs.length === 1 ? "registro" : "registros"}${pend ? ` · ${pend} pendiente${pend === 1 ? "" : "s"}` : ""}</div>
+        ${rs.map(renderTeRow).join("")}
+      </div>`;
+    }).join("");
+  }
+
+  async function resolverTE(id, estado) {
+    if (estado === "Anulada" && !confirm("¿Anular este tiempo extra? No se imputará en las novedades.")) return;
+    const j = await fetchJson({ action: "resolverTiempoExtra", admin: currentUser, hash: currentHash, id, estado });
+    if (j.status !== "ok") { alert(j.message || "No se pudo actualizar."); return; }
+    loadAdminTiempoExtra();
+  }
+
   // ---------- HORAS EXTRA (admin) ----------
   let adminHorasExtraCache = null;
 
@@ -3565,8 +3684,9 @@
   // Días + excedente de un empleado, ya recortados al período elegido.
   function novedadesFiltradas(r, st) {
     return {
-      dias:      filtrarPeriodo(r.dias || [], st),
-      excedente: (r.excedente || []).filter(e => mesEnPeriodo(e.mes, st))
+      dias:        filtrarPeriodo(r.dias || [], st),
+      excedente:   (r.excedente || []).filter(e => mesEnPeriodo(e.mes, st)),
+      tiempoExtra: filtrarPeriodo(r.tiempoExtra || [], st)
     };
   }
 
@@ -3580,14 +3700,15 @@
     const empleados = records.map(r => r.empleado).sort((a, b) => a.localeCompare(b));
     const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
     const mesesSet = [...new Set(recEmp.flatMap(r =>
-      [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes)]))]
+      [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes),
+       ...(r.tiempoExtra || []).map(t => mesKey(t.fecha))]))]
       .filter(k => k && k !== "0000-00").sort().reverse();
     const barHtml = filtroBarHtml("nov", st, { empleados, meses: mesesSet });
     const dlHtml = `<button class="btn btn-primary" style="margin-bottom:12px;" onclick="abrirDescargaNovedades()">⬇️ Descargar planilla (CSV)</button>`;
 
     const cuerpo = recEmp.map(r => {
       const nf = novedadesFiltradas(r, st);
-      if (!nf.dias.length && !nf.excedente.length) {
+      if (!nf.dias.length && !nf.excedente.length && !nf.tiempoExtra.length) {
         return `
         <div class="hist-day">
           <div class="hist-day-label">${r.empleado}</div>
@@ -3614,10 +3735,18 @@
           </div>
           <span class="badge badge-entrada">${e.horas} hs</span>
         </div>`).join("");
+      const filasTE = nf.tiempoExtra.map(t => `
+        <div class="hist-row salida">
+          <div>
+            <div class="hr-serv">${diaSemanaNombre(t.fecha)} ${t.fecha} · ${t.servicio}</div>
+            <div class="hr-hora">⏱️ tiempo extra aprobado · ${fmtMinutos(t.minutos)}</div>
+          </div>
+          <span class="badge badge-extra">Extra</span>
+        </div>`).join("");
       return `
         <div class="hist-day">
           <div class="hist-day-label">${r.empleado}</div>
-          ${filasDias}${filasEx}
+          ${filasDias}${filasTE}${filasEx}
         </div>`;
     }).join("");
 
@@ -3638,7 +3767,8 @@
     const st = filtroState("nov");
     const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
     const meses = [...new Set(recEmp.flatMap(r =>
-      [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes)]))]
+      [...(r.dias || []).map(d => mesKey(d.fecha)), ...(r.excedente || []).map(e => e.mes),
+       ...(r.tiempoExtra || []).map(t => mesKey(t.fecha))]))]
       .filter(k => k && k !== "0000-00").sort().reverse();
     const pre = (st.periodo !== "all" && st.periodo !== "rango") ? st.periodo : (meses[0] || "all");
     const sel = document.getElementById("modal-mes-nov-sel");
@@ -3667,13 +3797,17 @@
     const rows = [["Empleado", "Mes", "Fecha", "Día", "Tipo", "Servicio", "Desde", "Hasta", "Tiempo", "Horas"]];
     recEmp.forEach(r => {
       const nf = novedadesFiltradas(r, st);
-      if (!nf.dias.length && !nf.excedente.length) {
+      if (!nf.dias.length && !nf.excedente.length && !nf.tiempoExtra.length) {
         rows.push([r.empleado, "", "", "", "Sin novedades", "", "", "", "", ""]);
         return;
       }
       nf.dias.forEach(d => rows.push([
         r.empleado, mesLabel(mesKey(d.fecha)), d.fecha, diaSemanaNombre(d.fecha),
         d.tipo, d.servicio, minAHHMM(d.desde), minAHHMM(d.hasta), fmtMinutos(d.minutos), dec(d.minutos)
+      ]));
+      nf.tiempoExtra.forEach(t => rows.push([
+        r.empleado, mesLabel(mesKey(t.fecha)), t.fecha, diaSemanaNombre(t.fecha),
+        "Tiempo extra", t.servicio, "", "", fmtMinutos(t.minutos), dec(t.minutos)
       ]));
       nf.excedente.forEach(e => rows.push([
         r.empleado, mesLabel(e.mes), "", "", "Excedente semanal", "", "", "",
