@@ -518,6 +518,14 @@
 <!-- ==================== HOME ==================== -->
 <div id="screen-home" class="card">
 
+  <!-- Banner de vista previa (solo cuando un admin está "viendo como empleado") -->
+  <div id="preview-banner" style="display:none;background:#fde047;color:#854d0e;font-weight:800;
+       border-radius:12px;padding:10px 14px;margin-bottom:14px;display:none;
+       align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+    <span>👁️ Vista previa — así ve la app <span id="preview-emp-nombre"></span>. No se registran datos.</span>
+    <button class="btn btn-cambiar" style="margin:0;width:auto;flex-shrink:0;" onclick="salirVistaPrevia()">↩ Salir de la vista previa</button>
+  </div>
+
   <!-- Header con nombre y reloj -->
   <div class="user-header">
     <div class="mini-logo">
@@ -670,6 +678,7 @@
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminServiciosLista()">📍 Fichadas por servicio</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminServiciosDom()">📇 Servicios y domicilios</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminHorasExtra()">⏱️ Horas extra</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminTiempoExtra()">⏱️ Tiempo extra a aprobar</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminNovedades()">📄 Planilla de novedades</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminCargarFichada()">✍️ Cargar fichada</button>
     </div>
@@ -684,11 +693,18 @@
     <div id="grp-licencias" class="admin-group" style="display:none;">
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminVacaciones()">🏖️ Licencias, permisos y suplencias</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminAusencias()">🚫 Faltas / Ausencias</button>
-      <button class="btn btn-primary admin-sub-btn" onclick="openAdminTiempoExtra()">⏱️ Tiempo extra a aprobar</button>
     </div>
 
     <!-- Horas asignadas (directo) -->
     <button class="btn btn-primary" onclick="openAdminHorasAsignadas()" style="margin-bottom:18px;">🕐 Horas asignadas</button>
+
+    <!-- Vista previa: ver la app tal como la ve un empleado (modo prueba) -->
+    <div class="section-title">👁️ Ver la app como un empleado</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Modo prueba: navegás la app como la ve el empleado elegido. No se registran datos.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:18px;">
+      <select id="preview-emp-sel" style="flex:1;min-width:160px;"></select>
+      <button class="btn btn-primary" style="margin:0;width:auto;flex-shrink:0;" onclick="iniciarVistaPrevia()">👁️ Ver</button>
+    </div>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -1151,6 +1167,7 @@
     document.getElementById("modal-ausencia").style.display = "none";
   }
   async function confirmarAusencia() {
+    if (bloqueaPreview()) return;
     const a = ausenciasQueue[0];
     const motivo = document.getElementById("modal-ausencia-text").value.trim();
     if (!a || !motivo) return;
@@ -1228,6 +1245,10 @@
 
   let currentUser    = null;
   let currentHash    = null;
+  // Vista previa (admin viendo la app como un empleado). previewMode=true mientras
+  // dura; previewAdmin guarda las credenciales reales del admin para restaurarlas.
+  let previewMode    = false;
+  let previewAdmin   = null; // { user, hash }
   let currentCoords  = null;
   let selectedService = null;
   let clockInterval  = null;
@@ -1389,6 +1410,7 @@
 
   // Cambio voluntario desde adentro de la app.
   function pedirCambioPassword() {
+    if (bloqueaPreview()) return;
     const role = ADMINS.includes(currentUser) ? "admin" : "empleado";
     startCambioPassword({
       user: currentUser, hash: currentHash, role, forced: false,
@@ -1449,6 +1471,8 @@
   function logout() {
     clearSession();
     clearInterval(clockInterval);
+    previewMode = false; previewAdmin = null;
+    document.getElementById("preview-banner").style.display = "none";
     currentUser = currentHash = currentCoords = selectedService = null;
     adminEmpleado = adminServicio = null;
     coberturasActivas = [];
@@ -1622,6 +1646,7 @@
 
   // ---------- REGISTRAR ----------
   async function registrar(tipo) {
+    if (bloqueaPreview()) return;
     const msgEl = document.getElementById("home-msg");
     const btnE  = document.getElementById("btn-entrada");
     const btnS  = document.getElementById("btn-salida");
@@ -1763,6 +1788,7 @@
   }
 
   async function enviarVacaciones() {
+    if (bloqueaPreview()) return;
     const desdeIso = document.getElementById("vac-desde").value;
     const hastaIso = document.getElementById("vac-hasta").value;
     const msg = document.getElementById("vac-msg");
@@ -1903,6 +1929,13 @@
 
   async function cargarMisVacaciones() {
     const el = document.getElementById("vac-lista");
+    if (previewMode) {
+      // Sin credencial del empleado no se listan sus solicitudes; se muestra
+      // el formulario igual (así se ve la pantalla), con un aviso de vista previa.
+      misVacacionesSaldo = null; renderVacSaldo();
+      el.innerHTML = `<div class="hist-empty">👁️ Vista previa: las solicitudes del empleado no se muestran acá.</div>`;
+      return;
+    }
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
       const j = await fetchJson({ action: "misVacaciones", empleado: currentUser, hash: currentHash });
@@ -1948,6 +1981,7 @@
       propios.map(s => `<option value="${s.nombre}">${s.nombre}</option>`).join("");
   }
   async function enviarPermiso() {
+    if (bloqueaPreview()) return;
     const tipo     = document.getElementById("perm-tipo").value;
     const servicio = document.getElementById("perm-servicio").value;
     const fechaIso = document.getElementById("perm-fecha").value;
@@ -1975,6 +2009,10 @@
   }
   async function cargarMisPermisos() {
     const el = document.getElementById("perm-lista");
+    if (previewMode) {
+      el.innerHTML = `<div class="hist-empty">👁️ Vista previa: los permisos del empleado no se muestran acá.</div>`;
+      return;
+    }
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
       const j = await fetchJson({ action: "misPermisos", empleado: currentUser, hash: currentHash });
@@ -2000,7 +2038,12 @@
     el.innerHTML = `<div class="hist-loading">⏳ Cargando registros...</div>`;
 
     try {
-      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({ action: "historial", empleado: currentUser, hash: currentHash }).toString();
+      // En vista previa se leen los registros con la credencial del admin
+      // (adminHistorial), ya que la del empleado no está disponible.
+      const params = previewMode
+        ? { action: "adminHistorial", admin: previewAdmin.user, hash: previewAdmin.hash, empleado: currentUser }
+        : { action: "historial", empleado: currentUser, hash: currentHash };
+      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams(params).toString();
       const res  = await fetch(url, { redirect: "follow" });
       const json = await res.json();
 
@@ -2098,8 +2141,11 @@
     el.innerHTML = `<div class="hist-loading">⏳ Cargando productos...</div>`;
 
     try {
+      const auth = previewMode
+        ? { admin: previewAdmin.user, hash: previewAdmin.hash }
+        : { empleado: currentUser, hash: currentHash };
       const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
-        action: "materiales", servicio: selectedService.nombre, empleado: currentUser, hash: currentHash
+        action: "materiales", servicio: selectedService.nombre, ...auth
       }).toString();
       const res  = await fetch(url, { redirect: "follow" });
       const json = await res.json();
@@ -2156,6 +2202,7 @@
   }
 
   async function pedirProducto(index) {
+    if (bloqueaPreview()) return;
     const producto = currentMateriales[index].nombre;
     const input = document.getElementById("qty-" + index);
     let cantidad = input ? parseInt(input.value, 10) : 1;
@@ -2176,6 +2223,7 @@
   }
 
   async function marcarRecibido(index) {
+    if (bloqueaPreview()) return;
     const producto = currentMateriales[index].nombre;
     try {
       const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
@@ -2196,8 +2244,11 @@
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
 
     try {
+      const auth = previewMode
+        ? { admin: previewAdmin.user, hash: previewAdmin.hash }
+        : { empleado: currentUser, hash: currentHash };
       const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
-        action: "historialPedidos", servicio: selectedService.nombre, empleado: currentUser, hash: currentHash
+        action: "historialPedidos", servicio: selectedService.nombre, ...auth
       }).toString();
       const res  = await fetch(url, { redirect: "follow" });
       const json = await res.json();
@@ -2247,7 +2298,70 @@
     document.getElementById("admin-nombre").textContent = nombre;
     document.getElementById("screen-login").style.display = "none";
     document.getElementById("screen-admin").style.display = "block";
+    llenarPreviewSelect();
     renderAdminEmpleados();
+  }
+
+  // ---------- VISTA PREVIA: ver la app como un empleado (modo prueba) ----------
+  // El admin sigue autenticado; se guarda su credencial en previewAdmin y se
+  // "pinta" la pantalla de empleado con currentUser = el elegido. Las escrituras
+  // se bloquean (bloqueaPreview) y las lecturas que necesitan datos del empleado
+  // usan las credenciales del admin (endpoints que aceptan admin).
+  function llenarPreviewSelect() {
+    const sel = document.getElementById("preview-emp-sel");
+    if (!sel) return;
+    const emps = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = emps.map(e => `<option value="${e}">${e}</option>`).join("");
+  }
+
+  function iniciarVistaPrevia() {
+    const emp = document.getElementById("preview-emp-sel").value;
+    if (!emp) return;
+    previewAdmin = { user: currentUser, hash: currentHash }; // credenciales reales del admin
+    previewMode = true;
+    currentUser = emp;                 // la UI de empleado lee currentUser
+    selectedService = null;
+    coberturasActivas = []; permisosHoy = []; misAusencias = []; ausenciasQueue = [];
+    document.getElementById("preview-emp-nombre").textContent = emp;
+    const banner = document.getElementById("preview-banner");
+    banner.style.display = "flex";
+    document.getElementById("display-nombre").textContent = emp;
+    document.getElementById("screen-admin").style.display = "none";
+    document.getElementById("screen-home").style.display = "block";
+    // Reset visual de la pantalla de empleado.
+    document.getElementById("home-msg").textContent = "";
+    document.getElementById("section-servicios").style.display = "block";
+    document.getElementById("section-registro").style.display = "none";
+    document.getElementById("mat-sin-servicio").style.display = "block";
+    document.getElementById("mat-con-servicio").style.display = "none";
+    document.getElementById("hist-content").innerHTML = `<div class="hist-empty">Tocá "Actualizar historial" para ver los registros.</div>`;
+    startClock();
+    getLocation();
+    renderServices();
+    switchTab("registrar");
+  }
+
+  function salirVistaPrevia() {
+    if (!previewAdmin) return;
+    currentUser = previewAdmin.user;
+    currentHash = previewAdmin.hash;
+    previewAdmin = null;
+    previewMode = false;
+    selectedService = null;
+    clearInterval(clockInterval);
+    document.getElementById("preview-banner").style.display = "none";
+    document.getElementById("screen-home").style.display = "none";
+    document.getElementById("screen-admin").style.display = "block";
+    adminShowStep("empleados");
+  }
+
+  // Bloqueo de escrituras en vista previa. Devuelve true (y avisa) si está activa.
+  function bloqueaPreview() {
+    if (previewMode) {
+      alert(`👁️ Vista previa (como ${currentUser}). En este modo no se registran datos reales.`);
+      return true;
+    }
+    return false;
   }
 
   function adminShowStep(step) {

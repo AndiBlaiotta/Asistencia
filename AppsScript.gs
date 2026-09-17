@@ -1209,6 +1209,10 @@ function registrarTiempoExtra(empleado, fecha, servicio, horaEntrada, horaSalida
   // No contabilizar salidas anteriores a la fecha de arranque.
   const fi = fechaAInt(fecha), desde = fechaAInt(TIEMPO_EXTRA_DESDE);
   if (!isNaN(fi) && !isNaN(desde) && fi < desde) return 0;
+  // Domingos y feriados NO cuentan acá: ya van completos como novedad aparte
+  // (Domingo/Feriado en novedadesDe). Este tiempo extra es solo para días
+  // normales que se estiraron más allá del turno asignado.
+  if (diaDeSemana(fecha) === 0 || esFeriado(fi)) return 0;
   const sheet = getTiempoExtraSheet();
   const last = sheet.getLastRow();
   if (last > 1) {
@@ -1230,6 +1234,48 @@ function registrarTiempoExtra(empleado, fecha, servicio, horaEntrada, horaSalida
     horaEntrada, horaSalida, minutos, "Pendiente", now, ""
   ]]);
   return minutos;
+}
+
+// Backfill: recorre las fichadas YA cargadas de un empleado y registra el
+// tiempo extra que falte (idempotente vía registrarTiempoExtra). Empareja la
+// primera Entrada con la última Salida de cada servicio regular por día, desde
+// TIEMPO_EXTRA_DESDE. Cubre las fichadas anteriores al deploy de la feature.
+// Nota: solo mira los servicios propios del empleado (HORARIOS[empleado]); las
+// coberturas de otro las registra el camino en vivo al fichar la salida.
+function detectarTiempoExtra(empleado) {
+  const servHor = HORARIOS[empleado];
+  if (!servHor) return;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(empleado);
+  if (!sheet || sheet.getLastRow() <= 1) return;
+  const desde = fechaAInt(TIEMPO_EXTRA_DESDE);
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  const grp = {}; // "servicio|fi" -> { fecha, servicio, dow, ent:[], sal:[] }
+  data.forEach(row => {
+    const fechaStr = fmtCell(row[0]);
+    const fi = fechaAInt(fechaStr);
+    if (isNaN(fi) || (!isNaN(desde) && fi < desde)) return;
+    const servicio = (row[1] || "").toString();
+    if (!servHor[servicio]) return;              // solo servicios regulares propios
+    const dow = diaDeSemana(fechaStr);
+    if (!servHor[servicio][dow]) return;         // ese día no tiene turno
+    const hm = horaAMin(fmtCell(row[4]));
+    if (isNaN(hm)) return;
+    const key = servicio + "|" + fi;
+    const g = grp[key] || (grp[key] = { fecha: fechaStr, servicio, dow, ent: [], sal: [] });
+    ((row[3] || "").toString() === "Entrada" ? g.ent : g.sal).push({ hm, hora: fmtCell(row[4]) });
+  });
+  Object.keys(grp).forEach(k => {
+    const g = grp[k];
+    if (!g.ent.length || !g.sal.length) return;  // día sin par completo: se ignora
+    g.ent.sort((a, b) => a.hm - b.hm);
+    g.sal.sort((a, b) => a.hm - b.hm);
+    const ent = g.ent[0], sal = g.sal[g.sal.length - 1];
+    const rango = servHor[g.servicio][g.dow];
+    const durProg = horaAMin(rango[1]) - horaAMin(rango[0]);
+    if (isNaN(durProg) || durProg <= 0) return;
+    registrarTiempoExtra(empleado, g.fecha, g.servicio, ent.hora, sal.hora, (sal.hm - ent.hm) - durProg);
+  });
 }
 
 // Mapa "fecha|servicio" -> { minutos, estado } del tiempo extra NO anulado de un
@@ -2295,6 +2341,7 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
+      EMPLEADOS.forEach(e => detectarTiempoExtra(e));
       const sheet = getTiempoExtraSheet();
       if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
       const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, TIEMPO_EXTRA_HEADERS.length).getValues();
