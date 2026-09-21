@@ -3448,11 +3448,38 @@
     }).join("");
   }
 
-  // Servicios que quedan libres por la licencia (los propios del empleado). Cada
-  // uno con su suplente asignado, o un selector para asignarlo.
+  // Días de la semana (0=Dom … 6=Sáb) que caen dentro de un período dd/MM/yyyy.
+  // Devuelve un Set, o null si alguna fecha no se puede parsear (fallback: mostrar
+  // todos los servicios para no ocultar ninguno por error).
+  function weekdaysEnRango(desdeDMY, hastaDMY) {
+    const parse = s => {
+      const m = (s || "").toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null;
+    };
+    let d = parse(desdeDMY), h = parse(hastaDMY);
+    if (!d || !h) return null;
+    if (h < d) { const t = d; d = h; h = t; }
+    const set = new Set();
+    let cur = new Date(d), guard = 0;
+    while (cur <= h && guard < 400) { set.add(cur.getDay()); cur.setDate(cur.getDate() + 1); guard++; }
+    return set;
+  }
+
+  // ¿El servicio tiene turno en alguno de los días afectados por la licencia?
+  function servicioAfectado(s, dows) {
+    if (!dows) return true;                          // fecha ilegible: no filtrar
+    if (!s.horario || !s.horario.starts) return true; // sin horario definido: no se puede filtrar
+    return Object.keys(s.horario.starts).some(d => dows.has(Number(d)));
+  }
+
+  // Servicios que quedan libres por la licencia: SOLO los que el empleado tiene
+  // turno en algún día del período (no toda su nómina). Cada uno con su suplente
+  // asignado, o un selector para asignarlo.
   function renderFreedServices(v) {
-    const servicios = SERVICIOS[v.empleado] || [];
-    if (!servicios.length) return `<div class="hist-empty" style="padding:8px 0;">Este empleado no tiene servicios propios.</div>`;
+    if (!(SERVICIOS[v.empleado] || []).length) return `<div class="hist-empty" style="padding:8px 0;">Este empleado no tiene servicios propios.</div>`;
+    const dows = weekdaysEnRango(v.desde, v.hasta);
+    const servicios = (SERVICIOS[v.empleado] || []).filter(s => servicioAfectado(s, dows));
+    if (!servicios.length) return `<div class="hist-empty" style="padding:8px 0;">No tiene turnos en los días de esta licencia (${v.desde} → ${v.hasta}).</div>`;
     const otros = Object.keys(SERVICIOS).filter(e => e !== v.empleado);
     return servicios.map(s => {
       const cob = (adminCoberturasCache || []).find(c => c.vacacionId === v.id && c.servicio === s.nombre);
