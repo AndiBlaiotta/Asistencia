@@ -188,6 +188,44 @@ function jsonOut(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// ---- Caché de respuestas pesadas (CacheService) ----
+// Guarda por unos segundos el resultado ya armado de los reportes de admin que
+// recorren todas las hojas (resumen, tardanzas, novedades, horas extra), para
+// que la 2ª consulta no vuelva a leer toda la planilla. Datos globales (iguales
+// para todos los admins), así que la key no lleva usuario. CacheService topa en
+// 100 KB por key: si el JSON es más grande, no se cachea (se devuelve fresco).
+const CACHE_TTL_REPORTES = 45; // segundos
+function cacheGet(key) {
+  try {
+    const s = CacheService.getScriptCache().get(key);
+    return s ? JSON.parse(s) : null;
+  } catch (e) { return null; }
+}
+function cachePut(key, obj, ttl) {
+  try {
+    const s = JSON.stringify(obj);
+    if (s.length < 95000) CacheService.getScriptCache().put(key, s, ttl || CACHE_TTL_REPORTES);
+  } catch (e) { /* si no entra o falla, seguimos sin cache */ }
+}
+// Devuelve el resultado cacheado o lo calcula con compute(), lo cachea y lo
+// devuelve. compute() debe devolver el objeto a serializar con jsonOut.
+function cachedJson(key, ttl, compute) {
+  const hit = cacheGet(key);
+  if (hit) return jsonOut(hit);
+  const res = compute();
+  cachePut(key, res, ttl);
+  return jsonOut(res);
+}
+// Invalida los reportes cacheados cuando cambian los datos de fichadas
+// (fichar, anular, cargar fichada, aprobar/anular tiempo extra), así el admin
+// ve el cambio al instante y no espera al TTL.
+function invalidarReportes() {
+  try {
+    CacheService.getScriptCache().removeAll(
+      ["rep:resumen", "rep:tardanzas", "rep:novedades", "rep:horasextra"]);
+  } catch (e) { /* noop */ }
+}
+
 // Pepper secreto (Script Properties). setupAuth() lo crea si no existe.
 function getPepper() {
   return PropertiesService.getScriptProperties().getProperty("AUTH_PEPPER");
@@ -1423,11 +1461,14 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const records = EMPLEADOS.map(e => {
-        const a = horasAsignadasDe(e);
-        return { empleado: e, contrato: horasContratoSemanal(e), total: a.total, servicios: a.servicios };
+      // Sale de HORARIOS (config, no lee la planilla): TTL más largo.
+      return cachedJson("rep:horasasignadas", 600, function () {
+        const records = EMPLEADOS.map(e => {
+          const a = horasAsignadasDe(e);
+          return { empleado: e, contrato: horasContratoSemanal(e), total: a.total, servicios: a.servicios };
+        });
+        return { status: "ok", records };
       });
-      return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -1439,12 +1480,14 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const records = EMPLEADOS.map(e => ({
-        empleado: e,
-        contrato: horasContratoSemanal(e),
-        meses:    horasExtraDe(e)
-      }));
-      return jsonOut({ status: "ok", records });
+      return cachedJson("rep:horasextra", CACHE_TTL_REPORTES, function () {
+        const records = EMPLEADOS.map(e => ({
+          empleado: e,
+          contrato: horasContratoSemanal(e),
+          meses:    horasExtraDe(e)
+        }));
+        return { status: "ok", records };
+      });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -1459,12 +1502,14 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const records = EMPLEADOS.map(e => {
-        const n = novedadesDe(e);
-        return { empleado: e, contrato: horasContratoSemanal(e), dias: n.dias,
-                 excedente: n.excedente, tiempoExtra: tiempoExtraAprobadoDe(e) };
+      return cachedJson("rep:novedades", CACHE_TTL_REPORTES, function () {
+        const records = EMPLEADOS.map(e => {
+          const n = novedadesDe(e);
+          return { empleado: e, contrato: horasContratoSemanal(e), dias: n.dias,
+                   excedente: n.excedente, tiempoExtra: tiempoExtraAprobadoDe(e) };
+        });
+        return { status: "ok", records };
       });
-      return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -1557,6 +1602,7 @@ function doGet(e) {
       sheet.getRange(row, 11).setNumberFormat("@").setValue("");
       sheet.getRange(row, 1, 1, HEADERS.length)
         .setBackground(p.tipo === "Entrada" ? "#f0fdf4" : "#fef2f2");
+      invalidarReportes(); // carga manual cambia resumen/tardanzas/novedades
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
@@ -1590,6 +1636,7 @@ function doGet(e) {
         return jsonOut({ status: "error", message: "La fichada cambió. Recargá y probá de nuevo." });
       }
       sheet.deleteRow(fila);
+      invalidarReportes(); // anular una fichada cambia resumen/tardanzas/novedades
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
@@ -1609,35 +1656,37 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const RESUMEN_TAIL = 120;
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const records = [];
-      ss.getSheets().forEach(sheet => {
-        const empleado = sheet.getName();
-        if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
-        const lastRow = sheet.getLastRow();
-        if (lastRow <= 1) return;
-        const numRows  = Math.min(lastRow - 1, RESUMEN_TAIL);
-        const startRow = lastRow - numRows + 1;
-        const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
-        data.forEach((row, i) => {
-          const lat = row[5], lon = row[6];
-          const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
-          records.push({
-            fila:      startRow + i,   // nº de fila real en la hoja (para anular)
-            empleado:  empleado,
-            fecha:     fmtCell(row[0]),
-            servicio:  row[1],
-            direccion: row[2],
-            tipo:      row[3],
-            hora:      fmtCell(row[4]),
-            linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
-            estado:    row[9] || "",
-            motivo:    (row[10] || "").toString()
+      return cachedJson("rep:resumen", CACHE_TTL_REPORTES, function () {
+        const RESUMEN_TAIL = 120;
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const records = [];
+        ss.getSheets().forEach(sheet => {
+          const empleado = sheet.getName();
+          if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
+          const lastRow = sheet.getLastRow();
+          if (lastRow <= 1) return;
+          const numRows  = Math.min(lastRow - 1, RESUMEN_TAIL);
+          const startRow = lastRow - numRows + 1;
+          const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
+          data.forEach((row, i) => {
+            const lat = row[5], lon = row[6];
+            const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+            records.push({
+              fila:      startRow + i,   // nº de fila real en la hoja (para anular)
+              empleado:  empleado,
+              fecha:     fmtCell(row[0]),
+              servicio:  row[1],
+              direccion: row[2],
+              tipo:      row[3],
+              hora:      fmtCell(row[4]),
+              linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
+              estado:    row[9] || "",
+              motivo:    (row[10] || "").toString()
+            });
           });
         });
+        return { status: "ok", records };
       });
-      return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -1652,34 +1701,36 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const TARDANZAS_TAIL = 500;
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const records = [];
-      ss.getSheets().forEach(sheet => {
-        const empleado = sheet.getName();
-        if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
-        const lastRow = sheet.getLastRow();
-        if (lastRow <= 1) return;
-        const numRows  = Math.min(lastRow - 1, TARDANZAS_TAIL);
-        const startRow = lastRow - numRows + 1;
-        const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
-        data.forEach((row, i) => {
-          const estado = (row[9] || "").toString();
-          const m = estado.match(/Tarde\s+(\d+)/);
-          if (!m) return;
-          records.push({
-            fila:     startRow + i,    // nº de fila real en la hoja (para anular)
-            empleado: empleado,
-            servicio: row[1],
-            tipo:     row[3],
-            fecha:    fmtCell(row[0]),
-            hora:     fmtCell(row[4]),
-            minutos:  Number(m[1]),
-            motivo:   (row[10] || "").toString()
+      return cachedJson("rep:tardanzas", CACHE_TTL_REPORTES, function () {
+        const TARDANZAS_TAIL = 500;
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const records = [];
+        ss.getSheets().forEach(sheet => {
+          const empleado = sheet.getName();
+          if (HOJAS_NO_EMPLEADO.indexOf(empleado) !== -1) return;
+          const lastRow = sheet.getLastRow();
+          if (lastRow <= 1) return;
+          const numRows  = Math.min(lastRow - 1, TARDANZAS_TAIL);
+          const startRow = lastRow - numRows + 1;
+          const data = sheet.getRange(startRow, 1, numRows, HEADERS.length).getValues();
+          data.forEach((row, i) => {
+            const estado = (row[9] || "").toString();
+            const m = estado.match(/Tarde\s+(\d+)/);
+            if (!m) return;
+            records.push({
+              fila:     startRow + i,    // nº de fila real en la hoja (para anular)
+              empleado: empleado,
+              servicio: row[1],
+              tipo:     row[3],
+              fecha:    fmtCell(row[0]),
+              hora:     fmtCell(row[4]),
+              minutos:  Number(m[1]),
+              motivo:   (row[10] || "").toString()
+            });
           });
         });
+        return { status: "ok", records };
       });
-      return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -2342,7 +2393,12 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      EMPLEADOS.forEach(e => detectarTiempoExtra(e));
+      // El backfill recorre TODAS las hojas: es caro. Se corre como mucho una
+      // vez cada 5 min (marca en cache); entre medio, la vista usa lo ya detectado.
+      if (!CacheService.getScriptCache().get("te:backfill")) {
+        EMPLEADOS.forEach(e => detectarTiempoExtra(e));
+        CacheService.getScriptCache().put("te:backfill", "1", 300);
+      }
       const sheet = getTiempoExtraSheet();
       if (sheet.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
       const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, TIEMPO_EXTRA_HEADERS.length).getValues();
@@ -2374,6 +2430,7 @@ function doGet(e) {
       sheet.getRange(idx + 2, 8).setValue(p.estado);
       sheet.getRange(idx + 2, 10).setNumberFormat("@")
         .setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"));
+      invalidarReportes(); // el tiempo extra aprobado entra/sale de novedades
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
@@ -2528,6 +2585,7 @@ function doGet(e) {
         }
       }
 
+      invalidarReportes(); // la nueva fichada cambia resumen/tardanzas/novedades
       return jsonOut({ status: "ok", extra: TIEMPO_EXTRA_VISIBLE_EMPLEADO ? extraMin : 0 });
 
     } catch (err) {

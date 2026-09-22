@@ -262,6 +262,9 @@
     .badge-salida   { background: #fee2e2; color: #dc2626; }
     .badge-tarde    { background: #fef3c7; color: #b45309; }
     .badge-extra    { background: #fde047; color: #854d0e; }
+    .skel { background: linear-gradient(90deg,#e5e7eb 25%,#f3f4f6 37%,#e5e7eb 63%);
+            background-size: 400% 100%; border-radius: 6px; animation: skel 1.2s ease infinite; }
+    @keyframes skel { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
     .badge-comprado { background: #dbeafe; color: #2563eb; }
     .badge-sinasignar { background: #e5e7eb; color: #4b5563; }
 
@@ -1469,6 +1472,7 @@
   // ---------- LOGOUT ----------
   function logout() {
     clearSession();
+    swrClearAll(); // no dejar datos cacheados de un usuario para el siguiente
     clearInterval(clockInterval);
     previewMode = false; previewAdmin = null;
     document.getElementById("preview-banner").style.display = "none";
@@ -1755,6 +1759,50 @@
     return res.json();
   }
 
+  // ---------- CACHÉ INSTANTÁNEA (stale-while-revalidate) ----------
+  // El backend (Apps Script + Sheets) tiene ~1,2 s de piso por llamada. Para que
+  // la app se sienta rápida, guardamos en el celular la última respuesta de cada
+  // vista y la mostramos AL INSTANTE mientras pedimos la fresca por atrás. Subir
+  // SWR_VER invalida todo el caché viejo tras un cambio de formato de datos.
+  const SWR_VER = "v1";
+  function swrKey(name) { return `swr:${SWR_VER}:${currentUser || "?"}:${name}`; }
+  function swrGet(name) {
+    try { const r = localStorage.getItem(swrKey(name)); return r ? JSON.parse(r) : null; }
+    catch (e) { return null; }
+  }
+  function swrSet(name, json) {
+    try { localStorage.setItem(swrKey(name), JSON.stringify(json)); } catch (e) { /* lleno/no disponible */ }
+  }
+  function swrClearAll() {
+    try { Object.keys(localStorage).filter(k => k.indexOf("swr:") === 0).forEach(k => localStorage.removeItem(k)); }
+    catch (e) { /* noop */ }
+  }
+
+  // Placeholder "esqueleto" mientras carga (mejor percepción que "Cargando…").
+  function skeletonList(n) {
+    let s = "";
+    for (let i = 0; i < (n || 4); i++) {
+      s += `<div class="hist-row" style="opacity:.55;"><div style="flex:1;">
+        <div class="skel" style="width:60%;height:12px;"></div>
+        <div class="skel" style="width:35%;height:10px;margin-top:6px;"></div>
+      </div><div class="skel" style="width:56px;height:18px;border-radius:9px;"></div></div>`;
+    }
+    return s;
+  }
+
+  // Carga con SWR: pinta el cache al instante (si hay), pide lo fresco y re-pinta.
+  // onData(json) recibe la respuesta {status:"ok", ...}. skelEl: id del contenedor
+  // donde poner el esqueleto si no hay cache. Devuelve la respuesta fresca.
+  async function loadSWR(name, params, onData, skelEl) {
+    const cached = swrGet(name);
+    if (cached) onData(cached);
+    else if (skelEl) { const el = document.getElementById(skelEl); if (el) el.innerHTML = skeletonList(5); }
+    const json = await fetchJson(params);
+    if (json && json.status === "ok") { swrSet(name, json); onData(json); }
+    else if (!cached) throw new Error((json && json.message) || "No se pudo cargar.");
+    return json;
+  }
+
   // ---------- VACACIONES (empleado) ----------
   // "yyyy-MM-dd" (input date) -> "dd/MM/yyyy" (formato del resto de la app).
   function isoToDMY(iso) {
@@ -2032,64 +2080,55 @@
   }
 
   // ---------- CARGAR HISTORIAL DESDE SHEETS ----------
+  function renderHistorial(json) {
+    const el = document.getElementById("hist-content");
+    if (!json.records || json.records.length === 0) {
+      el.innerHTML = `<div class="hist-empty">No hay registros todavía.</div>`;
+      return;
+    }
+    const grupos = {};
+    json.records.forEach(r => { (grupos[r.fecha] = grupos[r.fecha] || []).push(r); });
+    el.innerHTML = Object.entries(grupos).map(([fecha, registros]) => `
+      <div class="hist-day">
+        <div class="hist-day-label">${fecha}</div>
+        ${registros.map(r => `
+          <div class="hist-row ${r.tipo.toLowerCase()}">
+            <div>
+              <div class="hr-serv">${r.servicio}</div>
+              <div class="hr-hora">${r.hora}</div>
+              ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
+            </div>
+            <div class="hr-right">
+              <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
+              ${r.estado && r.estado.startsWith('Tarde')
+                ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
+                : ''}
+              ${extraBadge(r.extra)}
+              ${r.linkGPS && r.linkGPS !== 'No disponible'
+                ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
+                : ''}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `).join("");
+  }
+
   async function cargarHistorial() {
     const el = document.getElementById("hist-content");
-    el.innerHTML = `<div class="hist-loading">⏳ Cargando registros...</div>`;
-
     try {
-      // En vista previa se leen los registros con la credencial del admin
-      // (adminHistorial), ya que la del empleado no está disponible.
-      const params = previewMode
-        ? { action: "adminHistorial", admin: previewAdmin.user, hash: previewAdmin.hash, empleado: currentUser }
-        : { action: "historial", empleado: currentUser, hash: currentHash };
-      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams(params).toString();
-      const res  = await fetch(url, { redirect: "follow" });
-      const json = await res.json();
-
-      if (json.status !== "ok") {
-        el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${json.message || "No se pudo cargar el historial."}</div>`;
+      // En vista previa: leer con credencial de admin (adminHistorial) y SIN
+      // cachear (evita mezclar con el cache real del empleado).
+      if (previewMode) {
+        el.innerHTML = skeletonList(5);
+        const json = await fetchJson({ action: "adminHistorial", admin: previewAdmin.user, hash: previewAdmin.hash, empleado: currentUser });
+        if (json.status !== "ok") { el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${json.message || "No se pudo cargar."}</div>`; return; }
+        renderHistorial(json);
         return;
       }
-
-      if (!json.records || json.records.length === 0) {
-        el.innerHTML = `<div class="hist-empty">No hay registros todavía.</div>`;
-        return;
-      }
-
-      // Agrupar por fecha
-      const grupos = {};
-      json.records.forEach(r => {
-        if (!grupos[r.fecha]) grupos[r.fecha] = [];
-        grupos[r.fecha].push(r);
-      });
-
-      el.innerHTML = Object.entries(grupos).map(([fecha, registros]) => `
-        <div class="hist-day">
-          <div class="hist-day-label">${fecha}</div>
-          ${registros.map(r => `
-            <div class="hist-row ${r.tipo.toLowerCase()}">
-              <div>
-                <div class="hr-serv">${r.servicio}</div>
-                <div class="hr-hora">${r.hora}</div>
-                ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
-              </div>
-              <div class="hr-right">
-                <span class="badge badge-${r.tipo.toLowerCase()}">${r.tipo}</span>
-                ${r.estado && r.estado.startsWith('Tarde')
-                  ? `<br><span class="badge badge-tarde" style="margin-top:4px;display:inline-block;">⚠️ ${r.estado}</span>`
-                  : ''}
-                ${extraBadge(r.extra)}
-                ${r.linkGPS && r.linkGPS !== 'No disponible'
-                  ? `<br><a href="${r.linkGPS}" target="_blank" style="font-size:11px;color:#4f46e5;">📍 Ver mapa</a>`
-                  : ''}
-              </div>
-            </div>
-          `).join("")}
-        </div>
-      `).join("");
-
+      await loadSWR("historial", { action: "historial", empleado: currentUser, hash: currentHash }, renderHistorial, "hist-content");
     } catch (e) {
-      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ Error al cargar: ${e.message}</div>`;
+      if (!swrGet("historial")) el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ Error al cargar: ${e.message}</div>`;
     }
   }
 
@@ -2519,16 +2558,11 @@
   async function loadAdminResumen(forzar) {
     const el = document.getElementById("admin-resumen");
     if (adminResumenCache && !forzar) { renderAdminResumen(adminResumenCache); return; }
-    el.innerHTML = `<div class="hist-loading">⏳ Cargando ingresos...</div>`;
     try {
-      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
-        action: "adminResumen", admin: currentUser, hash: currentHash
-      }).toString();
-      const res  = await fetch(url, { redirect: "follow" });
-      const json = await res.json();
-      if (json.status !== "ok") throw new Error(json.message || "No se pudo cargar.");
-      adminResumenCache = json.records || [];
-      renderAdminResumen(adminResumenCache);
+      await loadSWR("adminResumen",
+        { action: "adminResumen", admin: currentUser, hash: currentHash },
+        json => { adminResumenCache = json.records || []; renderAdminResumen(adminResumenCache); },
+        "admin-resumen");
     } catch (e) {
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
@@ -3090,16 +3124,11 @@
   async function loadAdminTardanzas(forzar) {
     const el = document.getElementById("admin-tardanzas");
     if (adminTardanzasCache && !forzar) { renderAdminTardanzas(adminTardanzasCache); return; }
-    el.innerHTML = `<div class="hist-loading">⏳ Cargando llegadas tarde...</div>`;
     try {
-      const url = APPS_SCRIPT_URL + "?" + new URLSearchParams({
-        action: "adminTardanzas", admin: currentUser, hash: currentHash
-      }).toString();
-      const res  = await fetch(url, { redirect: "follow" });
-      const json = await res.json();
-      if (json.status !== "ok") throw new Error(json.message || "No se pudo cargar.");
-      adminTardanzasCache = json.records || [];
-      renderAdminTardanzas(adminTardanzasCache);
+      await loadSWR("adminTardanzas",
+        { action: "adminTardanzas", admin: currentUser, hash: currentHash },
+        json => { adminTardanzasCache = json.records || []; renderAdminTardanzas(adminTardanzasCache); },
+        "admin-tardanzas");
     } catch (e) {
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
@@ -3363,12 +3392,25 @@
     loadAdminVacaciones(false);
   }
 
+  // Aplica un snapshot {v,c,pm} a los caches en memoria y re-pinta.
+  function aplicarLicencias(snap) {
+    adminVacacionesCache = snap.v || [];
+    adminCoberturasCache = snap.c || [];
+    adminPermisosCache   = snap.pm || [];
+    renderLicencias();
+  }
+
   async function loadAdminVacaciones() {
     const el = document.getElementById("admin-vacaciones");
-    document.getElementById("lic-resumen").innerHTML = "";
-    document.getElementById("lic-controls").innerHTML = "";
-    el.innerHTML = `<div class="hist-loading">⏳ Cargando solicitudes...</div>`;
-    document.getElementById("admin-permisos").innerHTML = "";
+    // Cache instantáneo (si hay); si no, esqueleto.
+    const cached = swrGet("adminLicencias");
+    if (cached && cached.snap) aplicarLicencias(cached.snap);
+    else {
+      document.getElementById("lic-resumen").innerHTML = "";
+      document.getElementById("lic-controls").innerHTML = "";
+      el.innerHTML = skeletonList(5);
+      document.getElementById("admin-permisos").innerHTML = "";
+    }
     try {
       const [v, c, pm] = await Promise.all([
         fetchJson({ action: "adminVacaciones", admin: currentUser, hash: currentHash }),
@@ -3376,12 +3418,15 @@
         fetchJson({ action: "adminPermisos", admin: currentUser, hash: currentHash })
       ]);
       if (v.status !== "ok") throw new Error(v.message || "No se pudo cargar.");
-      adminVacacionesCache = v.records || [];
-      adminCoberturasCache = (c.status === "ok" && c.records) ? c.records : [];
-      adminPermisosCache   = (pm.status === "ok" && pm.records) ? pm.records : [];
-      renderLicencias();
+      const snap = {
+        v:  v.records || [],
+        c:  (c.status === "ok" && c.records) ? c.records : [],
+        pm: (pm.status === "ok" && pm.records) ? pm.records : []
+      };
+      swrSet("adminLicencias", { snap });
+      aplicarLicencias(snap);
     } catch (e) {
-      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+      if (!cached) el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
   }
 
@@ -3458,9 +3503,15 @@
   async function resolverPerm(id, estado) {
     const txt = estado === "Aceptada" ? "aceptar" : "rechazar";
     if (!confirm(`¿Seguro que querés ${txt} este permiso?`)) return;
+    // Optimista: actualizo el estado local y re-pinto ya.
+    const rec = (adminPermisosCache || []).find(r => r.id === id);
+    const prev = rec ? rec.estado : null;
+    if (rec) { rec.estado = estado; renderLicencias(); swrSet("adminLicencias", { snap: { v: adminVacacionesCache, c: adminCoberturasCache, pm: adminPermisosCache } }); }
     const j = await fetchJson({ action: "resolverPermiso", admin: currentUser, hash: currentHash, id, estado });
-    if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
-    loadAdminVacaciones();
+    if (j.status !== "ok") {
+      if (rec) { rec.estado = prev; renderLicencias(); }
+      alert(j.message || "No se pudo.");
+    }
   }
 
   // id de elemento válido a partir del nombre del servicio.
@@ -3562,9 +3613,16 @@
   async function resolverVac(id, estado) {
     const txt = estado === "Aceptada" ? "aceptar" : "rechazar";
     if (!confirm(`¿Seguro que querés ${txt} esta solicitud de vacaciones?`)) return;
+    // Optimista: cambio el estado local y re-pinto ya (al aceptar aparecen los
+    // selectores de suplente sin esperar la recarga).
+    const rec = (adminVacacionesCache || []).find(r => r.id === id);
+    const prev = rec ? rec.estado : null;
+    if (rec) { rec.estado = estado; renderLicencias(); swrSet("adminLicencias", { snap: { v: adminVacacionesCache, c: adminCoberturasCache, pm: adminPermisosCache } }); }
     const j = await fetchJson({ action: "resolverVacaciones", admin: currentUser, hash: currentHash, id, estado });
-    if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
-    loadAdminVacaciones();
+    if (j.status !== "ok") {
+      if (rec) { rec.estado = prev; renderLicencias(); }
+      alert(j.message || "No se pudo.");
+    }
   }
 
   async function asignarCob(vacId, servEnc, selId) {
@@ -3687,12 +3745,11 @@
 
   async function loadAdminTiempoExtra() {
     const el = document.getElementById("admin-tiempoextra");
-    el.innerHTML = `<div class="hist-loading">⏳ Cargando tiempo extra...</div>`;
     try {
-      const j = await fetchJson({ action: "adminTiempoExtra", admin: currentUser, hash: currentHash });
-      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
-      adminTiempoExtraCache = j.records || [];
-      renderAdminTiempoExtra();
+      await loadSWR("adminTiempoExtra",
+        { action: "adminTiempoExtra", admin: currentUser, hash: currentHash },
+        json => { adminTiempoExtraCache = json.records || []; renderAdminTiempoExtra(); },
+        "admin-tiempoextra");
     } catch (e) {
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
@@ -3757,9 +3814,15 @@
 
   async function resolverTE(id, estado) {
     if (estado === "Anulada" && !confirm("¿Anular este tiempo extra? No se imputará en las novedades.")) return;
+    // Optimista: actualizo el estado localmente y re-pinto YA, sin recargar todo.
+    const rec = (adminTiempoExtraCache || []).find(r => r.id === id);
+    const prev = rec ? rec.estado : null;
+    if (rec) { rec.estado = estado; renderAdminTiempoExtra(); swrSet("adminTiempoExtra", { status: "ok", records: adminTiempoExtraCache }); }
     const j = await fetchJson({ action: "resolverTiempoExtra", admin: currentUser, hash: currentHash, id, estado });
-    if (j.status !== "ok") { alert(j.message || "No se pudo actualizar."); return; }
-    loadAdminTiempoExtra();
+    if (j.status !== "ok") {
+      if (rec) { rec.estado = prev; renderAdminTiempoExtra(); } // rollback si falló
+      alert(j.message || "No se pudo actualizar.");
+    }
   }
 
   // ---------- HORAS EXTRA (admin) ----------
