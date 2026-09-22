@@ -1028,7 +1028,9 @@
       { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires",
         horario: { texto: "Lun/Jue · 12:30–15:30", starts: { 1: "12:30", 4: "12:30" } } },
       { nombre: "San Martín",   dir: "San Martín 88, Morón, Buenos Aires",
-        horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } }
+        horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } },
+      { nombre: "Del Cimarron", dir: "Del Cimarron 1823, Villa Udaondo, Gran Buenos Aires",
+        horario: { texto: "Mar 16–18 · Sáb 8–10", starts: { 2: "16:00", 6: "08:00" } } }
     ],
     "Milagros Acuña": [
       { nombre: "Jonte", dir: "Jonte 330, Ramos Mejía, Buenos Aires",
@@ -1039,11 +1041,7 @@
   // Servicios SIN asignar: no están en la lista de ningún empleado (no se
   // pueden fichar), pero se muestran en el panel de administradores con
   // toda la info disponible y un cartel "Sin asignar".
-  //  - Avellaneda: servicio futuro, todavía sin días ni horario.
-  const PENDIENTES = [
-    { nombre: "Avellaneda", dir: "Nicolás Avellaneda 930, Castelar, Buenos Aires",
-      nota: "Servicio futuro · todavía sin días ni horario definidos" }
-  ];
+  const PENDIENTES = [];
 
   // "Horas Extras" y "Suplencias" son servicios extra que tienen TODOS los
   // empleados, por encima de los suyos. No tienen dirección fija: el empleado
@@ -2607,7 +2605,8 @@
 
     // Servicios sin asignar (solo lectura): no se fichan, se muestran acá
     // con toda la info disponible y el cartel "Sin asignar".
-    document.getElementById("admin-pendientes").innerHTML = PENDIENTES.map(s => `
+    document.getElementById("admin-pendientes").innerHTML = PENDIENTES.length
+      ? PENDIENTES.map(s => `
       <div class="service-card" style="cursor:default;">
         <div>
           <div class="s-nombre">${s.nombre}</div>
@@ -2617,7 +2616,8 @@
         </div>
         <span class="badge badge-sinasignar">Sin asignar</span>
       </div>
-    `).join("");
+    `).join("")
+      : `<div class="hist-empty">No hay servicios sin asignar.</div>`;
   }
 
   // PASO 2: servicios del empleado elegido.
