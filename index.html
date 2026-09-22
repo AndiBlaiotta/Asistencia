@@ -838,10 +838,11 @@
   <!-- VACACIONES: solicitudes, aprobación y asignación de suplentes -->
   <div id="admin-step-vacaciones" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
-    <div class="section-title" style="margin-top:16px;">Licencias y suplencias</div>
+    <div class="section-title" style="margin-top:16px;">Licencias y permisos</div>
     <button class="btn-refresh" onclick="loadAdminVacaciones(true)">🔄 Actualizar</button>
+    <div id="lic-resumen"></div>
+    <div id="lic-controls"></div>
     <div id="admin-vacaciones"></div>
-    <div class="section-title" style="margin-top:22px;">⏱️ Permisos de un día</div>
     <div id="admin-permisos"></div>
   </div>
 
@@ -3351,6 +3352,11 @@
 
   // ---------- VACACIONES / COBERTURAS (admin) ----------
   let adminVacacionesCache = null, adminCoberturasCache = null, adminPermisosCache = null;
+  // Vista de la pantalla de licencias: qué lista se muestra y con qué filtro de
+  // estado. Separar permisos (tardanzas/retiros) de las licencias de días
+  // enteros para que no queden enterrados.
+  let licTipo = "permisos";      // "licencias" | "permisos"
+  let licEstado = "Pendiente";   // "Pendiente" | "all"
 
   function openAdminVacaciones() {
     adminShowStep("vacaciones");
@@ -3359,8 +3365,10 @@
 
   async function loadAdminVacaciones() {
     const el = document.getElementById("admin-vacaciones");
+    document.getElementById("lic-resumen").innerHTML = "";
+    document.getElementById("lic-controls").innerHTML = "";
     el.innerHTML = `<div class="hist-loading">⏳ Cargando solicitudes...</div>`;
-    document.getElementById("admin-permisos").innerHTML = `<div class="hist-loading">⏳ Cargando permisos...</div>`;
+    document.getElementById("admin-permisos").innerHTML = "";
     try {
       const [v, c, pm] = await Promise.all([
         fetchJson({ action: "adminVacaciones", admin: currentUser, hash: currentHash }),
@@ -3371,17 +3379,58 @@
       adminVacacionesCache = v.records || [];
       adminCoberturasCache = (c.status === "ok" && c.records) ? c.records : [];
       adminPermisosCache   = (pm.status === "ok" && pm.records) ? pm.records : [];
-      renderAdminVacaciones();
-      renderAdminPermisos();
+      renderLicencias();
     } catch (e) {
       el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
     }
   }
 
+  const esPend = r => r.estado === "Pendiente";
+
+  // Resumen + controles (selector Licencias/Permisos y filtro de estado) y
+  // muestra la lista elegida. Los permisos ya no quedan debajo de las licencias.
+  function renderLicencias() {
+    const vacs  = adminVacacionesCache || [];
+    const perms = adminPermisosCache   || [];
+    const vPend = vacs.filter(esPend).length;
+    const pPend = perms.filter(esPend).length;
+
+    document.getElementById("lic-resumen").innerHTML = `
+      <div class="filtro-total" style="display:flex;gap:16px;flex-wrap:wrap;">
+        <span>🏖️ Licencias: <b>${vacs.length}</b>${vPend ? ` · <b>${vPend}</b> pend.` : ""}</span>
+        <span>⏱️ Permisos: <b>${perms.length}</b>${pPend ? ` · <b>${pPend}</b> pend.` : ""}</span>
+      </div>`;
+
+    const tabBtn = (t, label, pend) =>
+      `<button class="btn-mini ${licTipo === t ? "btn-pedir" : ""}" style="${licTipo === t ? "" : "background:#f1f5f9;color:#4b5563;border:1.5px solid var(--border);"}" onclick="setLicTipo('${t}')">${label}${pend ? ` (${pend})` : ""}</button>`;
+    const estBtn = (e, label) =>
+      `<button class="btn-mini ${licEstado === e ? "btn-recibido" : ""}" style="${licEstado === e ? "" : "background:#f1f5f9;color:#4b5563;border:1.5px solid var(--border);"}" onclick="setLicEstado('${e}')">${label}</button>`;
+    document.getElementById("lic-controls").innerHTML = `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 6px;">
+        ${tabBtn("permisos", "⏱️ Permisos", pPend)}${tabBtn("licencias", "🏖️ Licencias", vPend)}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+        ${estBtn("Pendiente", "Pendientes")}${estBtn("all", "Todas")}
+      </div>`;
+
+    const vacEl = document.getElementById("admin-vacaciones");
+    const perEl = document.getElementById("admin-permisos");
+    vacEl.style.display = licTipo === "licencias" ? "block" : "none";
+    perEl.style.display = licTipo === "permisos"  ? "block" : "none";
+    if (licTipo === "licencias") renderAdminVacaciones(); else renderAdminPermisos();
+  }
+
+  function setLicTipo(t)   { licTipo = t;   renderLicencias(); }
+  function setLicEstado(e) { licEstado = e; renderLicencias(); }
+
   function renderAdminPermisos() {
     const el = document.getElementById("admin-permisos");
-    const perms = adminPermisosCache || [];
-    if (!perms.length) { el.innerHTML = `<div class="hist-empty">No hay permisos.</div>`; return; }
+    let perms = adminPermisosCache || [];
+    if (licEstado === "Pendiente") perms = perms.filter(esPend);
+    if (!perms.length) {
+      el.innerHTML = `<div class="hist-empty">${licEstado === "Pendiente" ? "No hay permisos pendientes. 🎉" : "No hay permisos."}</div>`;
+      return;
+    }
     const orden = { Pendiente: 0, Aceptada: 1, Rechazada: 2 };
     const val = e => (orden[e] === undefined ? 9 : orden[e]);
     const sorted = perms.slice().sort((a, b) => val(a.estado) - val(b.estado));
@@ -3419,8 +3468,14 @@
 
   function renderAdminVacaciones() {
     const el = document.getElementById("admin-vacaciones");
-    const vacs = adminVacacionesCache || [];
-    if (!vacs.length) { el.innerHTML = `<div class="hist-empty">No hay solicitudes de vacaciones.</div>`; return; }
+    let vacs = adminVacacionesCache || [];
+    // Bajo "Pendientes" mostramos también las Aceptadas: es donde se asignan los
+    // suplentes (siguen siendo accionables). Solo se ocultan las Rechazadas.
+    if (licEstado === "Pendiente") vacs = vacs.filter(v => v.estado !== "Rechazada");
+    if (!vacs.length) {
+      el.innerHTML = `<div class="hist-empty">${licEstado === "Pendiente" ? "No hay licencias pendientes ni por cubrir. 🎉" : "No hay solicitudes de licencias."}</div>`;
+      return;
+    }
     const orden = { Pendiente: 0, Aceptada: 1, Rechazada: 2 };
     const val = e => (orden[e] === undefined ? 9 : orden[e]);
     const sorted = vacs.slice().sort((a, b) => val(a.estado) - val(b.estado));
