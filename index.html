@@ -175,6 +175,9 @@
 
     /* Acordeón del menú admin */
     .admin-group-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    /* Botones directos del menú admin: texto a la izquierda para que queden
+       alineados con los botones de grupo (que ya van a la izquierda). */
+    .admin-main-btn { text-align: left; }
     .grp-caret { font-size: 12px; transition: transform 0.15s; opacity: 0.85; }
     .admin-group-btn.open .grp-caret { transform: rotate(90deg); }
     .admin-group { border-left: 3px solid var(--cyan-mid); padding-left: 10px; margin: 4px 0 8px; }
@@ -687,7 +690,7 @@
     </div>
 
     <!-- Materiales y compras (directo) -->
-    <button class="btn btn-primary" onclick="openAdminCompras()" style="margin-bottom:8px;">🛒 Materiales y compras</button>
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminCompras()" style="margin-bottom:8px;">🛒 Materiales y compras</button>
 
     <!-- Grupo: Licencias y faltas -->
     <button class="btn btn-primary admin-group-btn" onclick="toggleAdminGroup('grp-licencias', this)" style="margin-bottom:8px;">
@@ -699,7 +702,7 @@
     </div>
 
     <!-- Horas asignadas (directo) -->
-    <button class="btn btn-primary" onclick="openAdminHorasAsignadas()" style="margin-bottom:18px;">🕐 Horas asignadas</button>
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminHorasAsignadas()" style="margin-bottom:18px;">🕐 Horas asignadas</button>
 
     <!-- Vista previa: ver la app tal como la ve un empleado (modo prueba) -->
     <div class="section-title">👁️ Ver la app como un empleado</div>
