@@ -108,7 +108,7 @@ const TIEMPO_EXTRA_MIN     = 30; // umbral mínimo (min) para contar tiempo extr
 const TIEMPO_EXTRA_DESDE   = "01/09/2026";
 // Mientras se valida, el tiempo extra SOLO lo ven los administradores. Al ponerlo
 // en true, el empleado también lo ve (badge en su historial + aviso al fichar).
-const TIEMPO_EXTRA_VISIBLE_EMPLEADO = false;
+const TIEMPO_EXTRA_VISIBLE_EMPLEADO = true;
 
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
 const PRODUCTOS = [
