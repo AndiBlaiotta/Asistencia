@@ -94,6 +94,19 @@ const AUSENCIAS_DESDE = "05/08/2026";
 // Ventana máxima hacia atrás (días) que se revisa en cada detección.
 const AUSENCIAS_LOOKBACK_DIAS = 60;
 
+// Alta de un servicio para un empleado (dd/MM/yyyy). Cuando se suma un servicio
+// nuevo a HORARIOS, la detección de ausencias NO debe marcar los días anteriores
+// a que ese servicio realmente arrancó. Key = "Empleado|Servicio". Los turnos
+// (y las faltas) de ese servicio recién cuentan desde esta fecha; las ausencias
+// registradas antes se borran solas en la próxima detección.
+const SERVICIOS_DESDE = {
+  "Alejandro Jelvez|Del Cimarron": "26/09/2026"
+};
+function servicioDesdeInt(empleado, servicio) {
+  const f = SERVICIOS_DESDE[empleado + "|" + servicio];
+  return f ? fechaAInt(f) : NaN;
+}
+
 // ---- Tiempo extra por fichada (salida más allá de la duración asignada) ----
 // Al marcar la SALIDA de un servicio regular, si (salida − entrada) supera la
 // duración programada del turno por al menos TIEMPO_EXTRA_MIN minutos, se
@@ -841,13 +854,23 @@ function detectarAusencias(empleado) {
   }
 
   // Ausencias ya registradas del empleado: set "servicio|fechaInt".
+  // De paso, limpiar las que quedaron mal cargadas ANTES del alta de un servicio
+  // (ej. un servicio nuevo que retroactivamente marcó faltas viejas). Se borran
+  // de abajo hacia arriba para no correr los índices.
   const asheet = getAusenciasSheet();
   const existentes = {};
   if (asheet.getLastRow() > 1) {
     const aa = asheet.getRange(2, 1, asheet.getLastRow() - 1, AUSENCIAS_HEADERS.length).getValues();
-    aa.forEach(r => {
-      if ((r[1] || "").toString() === empleado) existentes[(r[3] || "") + "|" + fechaAInt(r[2])] = true;
+    const aBorrar = [];
+    aa.forEach((r, i) => {
+      if ((r[1] || "").toString() !== empleado) return;
+      const serv = (r[3] || "").toString();
+      const fiA  = fechaAInt(r[2]);
+      const desdeServ = servicioDesdeInt(empleado, serv);
+      if (!isNaN(desdeServ) && !isNaN(fiA) && fiA < desdeServ) { aBorrar.push(i + 2); return; }
+      existentes[serv + "|" + fiA] = true;
     });
+    for (let k = aBorrar.length - 1; k >= 0; k--) asheet.deleteRow(aBorrar[k]);
   }
 
   const nuevas = [];
@@ -864,6 +887,8 @@ function detectarAusencias(empleado) {
     const fechaStr = Utilities.formatDate(d, tz, "dd/MM/yyyy");
     Object.keys(servHor).forEach(servicio => {
       if (!servHor[servicio][dow]) return;        // ese día no trabaja ese servicio
+      const desdeServ = servicioDesdeInt(empleado, servicio);
+      if (!isNaN(desdeServ) && fi < desdeServ) return; // antes del alta del servicio
       const key = servicio + "|" + fi;
       if (entradaSet[key]) return;                 // fichó: presente
       if (existentes[key]) return;                 // ya registrada
