@@ -100,7 +100,8 @@ const AUSENCIAS_LOOKBACK_DIAS = 60;
 // (y las faltas) de ese servicio recién cuentan desde esta fecha; las ausencias
 // registradas antes se borran solas en la próxima detección.
 const SERVICIOS_DESDE = {
-  "Alejandro Jelvez|Del Cimarron": "26/09/2026"
+  "Alejandro Jelvez|Del Cimarron": "26/09/2026",
+  "Rebeca Ayala|Arredondo": "02/10/2026"
 };
 function servicioDesdeInt(empleado, servicio) {
   const f = SERVICIOS_DESDE[empleado + "|" + servicio];
@@ -601,7 +602,8 @@ const HORARIOS = {
   "Rebeca Ayala": {
     "Mitre":      { 2: ["08:00", "12:00"], 4: ["08:00", "12:00"], 6: ["08:00", "12:00"] },
     "Santa Rosa": { 1: ["08:00", "12:00"], 3: ["08:00", "12:00"], 5: ["08:00", "12:00"] },
-    "Mercedes":   { 1: ["12:30", "14:30"], 3: ["12:30", "14:30"], 5: ["12:30", "14:30"] }
+    "Mercedes":   { 1: ["12:30", "14:30"], 3: ["12:30", "14:30"], 5: ["12:30", "14:30"] },
+    "Arredondo":  { 1: ["14:30", "17:30"], 3: ["14:30", "17:30"], 5: ["14:30", "17:30"] }
   },
   "Alejandro Jelvez": {
     "Rivadavia":    { 1: ["09:00", "12:00"], 4: ["09:00", "12:00"] },
@@ -2498,6 +2500,14 @@ function doGet(e) {
       // ---- Validaciones de la fichada (antes de escribir nada) ----
       const ultima     = sheet ? ultimaFichadaServicio(sheet, servicio) : null;
       const ultimoTipo = ultima ? ultima.tipo : null;
+
+      // Alta del servicio: no se puede fichar antes de la fecha en que arranca
+      // (servicio nuevo con inicio futuro). Refuerza el ocultamiento del front.
+      const desdeServ = servicioDesdeInt(empleado, servicio);
+      if (!isNaN(desdeServ) && fechaAInt(fecha) < desdeServ) {
+        return jsonOut({ status: "error",
+          message: `El servicio "${servicio}" arranca el ${SERVICIOS_DESDE[empleado + "|" + servicio]}.` });
+      }
 
       // Reglas A/B: no dos entradas seguidas ni una salida sin entrada previa.
       if (tipo === "Entrada" && ultimoTipo === "Entrada") {
