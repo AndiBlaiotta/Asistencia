@@ -4113,6 +4113,19 @@
     return s.custom ? "Dirección variable" : "—";
   }
 
+  // Servicios ÚNICOS (por nombre = una factura): agrupa a los empleados que
+  // hacen el mismo servicio en una sola entrada. Un servicio compartido (ej.
+  // Acorus lo hacen dos personas) cuenta UNA sola vez.
+  function serviciosUnicos() {
+    const map = {};
+    Object.keys(SERVICIOS).forEach(emp => (SERVICIOS[emp] || []).forEach(s => {
+      const k = s.nombre;
+      if (!map[k]) map[k] = { nombre: s.nombre, dir: domicilioDe(s), personas: [] };
+      map[k].personas.push({ empleado: emp, horario: s.horario ? s.horario.texto : "" });
+    }));
+    return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }
+
   function renderAdminServiciosDom() {
     const el = document.getElementById("admin-serviciosdom");
     const empleados = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
@@ -4127,48 +4140,59 @@
         </select>
       </div>`;
 
-    const emps = servDomEmp ? [servDomEmp] : empleados;
-    const totalServ = emps.reduce((n, e) => n + (SERVICIOS[e] || []).length, 0);
-    const totalHtml = `<div class="filtro-total">${emps.length} ${emps.length === 1 ? "empleado" : "empleados"} · `
-      + `<b>${totalServ}</b> ${totalServ === 1 ? "servicio" : "servicios"}</div>`;
-
     const dlHtml = `<button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarServiciosCSV()">⬇️ Descargar planilla (CSV)</button>`;
 
-    const cuerpo = emps.map(emp => {
-      const servs = (SERVICIOS[emp] || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre));
-      if (!servs.length) {
-        return `
+    let totalHtml, cuerpo;
+    if (servDomEmp) {
+      // Filtrado por un empleado: se listan SUS servicios.
+      const servs = (SERVICIOS[servDomEmp] || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre));
+      totalHtml = `<div class="filtro-total"><b>${servs.length}</b> ${servs.length === 1 ? "servicio" : "servicios"} de ${servDomEmp}</div>`;
+      cuerpo = `
         <div class="hist-day">
-          <div class="hist-day-label">${emp}</div>
-          <div class="hist-row"><div><div class="hr-hora" style="color:var(--gray);font-weight:600;">Sin servicios asignados</div></div></div>
+          <div class="hist-day-label">${servDomEmp}</div>
+          ${servs.length ? servs.map(s => `
+            <div class="hist-row">
+              <div>
+                <div class="hr-serv">${s.nombre}</div>
+                <div class="hr-hora">📍 ${domicilioDe(s)}</div>
+                ${s.horario ? `<div class="hr-hora" style="color:#4f46e5;font-weight:700;">🕐 ${s.horario.texto}</div>` : ""}
+              </div>
+            </div>`).join("")
+            : `<div class="hist-row"><div><div class="hr-hora" style="color:var(--gray);font-weight:600;">Sin servicios asignados</div></div></div>`}
         </div>`;
-      }
-      return `
-      <div class="hist-day">
-        <div class="hist-day-label">${emp} · ${servs.length} ${servs.length === 1 ? "servicio" : "servicios"}</div>
-        ${servs.map(s => `
-          <div class="hist-row">
-            <div>
-              <div class="hr-serv">${s.nombre}</div>
-              <div class="hr-hora">📍 ${domicilioDe(s)}</div>
-              ${s.horario ? `<div class="hr-hora" style="color:#4f46e5;font-weight:700;">🕐 ${s.horario.texto}</div>` : ""}
-            </div>
-          </div>`).join("")}
-      </div>`;
-    }).join("");
+    } else {
+      // Todos: agrupado por SERVICIO único (los compartidos cuentan una vez).
+      const unicos = serviciosUnicos();
+      totalHtml = `<div class="filtro-total"><b>${unicos.length}</b> ${unicos.length === 1 ? "servicio" : "servicios"} (factura única por servicio)</div>`;
+      cuerpo = unicos.map(u => `
+        <div class="hist-row">
+          <div>
+            <div class="hr-serv">${u.nombre}</div>
+            <div class="hr-hora">📍 ${u.dir}</div>
+            ${u.personas.map(p => `<div class="hr-hora" style="color:#4f46e5;font-weight:600;">👤 ${p.empleado}${p.horario ? ` · 🕐 ${p.horario}` : ""}</div>`).join("")}
+          </div>
+        </div>`).join("");
+    }
 
     el.innerHTML = selectorHtml + totalHtml + dlHtml + cuerpo;
   }
 
   function descargarServiciosCSV() {
-    const empleados = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
-    const emps = servDomEmp ? [servDomEmp] : empleados;
-    const rows = [["Empleado", "Servicio", "Domicilio", "Horario"]];
-    emps.forEach(emp => {
-      const servs = (SERVICIOS[emp] || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre));
-      if (!servs.length) { rows.push([emp, "Sin servicios asignados", "", ""]); return; }
-      servs.forEach(s => rows.push([emp, s.nombre, domicilioDe(s), s.horario ? s.horario.texto : ""]));
-    });
+    let rows;
+    if (servDomEmp) {
+      rows = [["Empleado", "Servicio", "Domicilio", "Horario"]];
+      const servs = (SERVICIOS[servDomEmp] || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre));
+      if (!servs.length) rows.push([servDomEmp, "Sin servicios asignados", "", ""]);
+      else servs.forEach(s => rows.push([servDomEmp, s.nombre, domicilioDe(s), s.horario ? s.horario.texto : ""]));
+    } else {
+      // Por servicio único: una fila por servicio, con las personas que lo hacen.
+      rows = [["Servicio", "Domicilio", "Personas", "Horarios"]];
+      serviciosUnicos().forEach(u => rows.push([
+        u.nombre, u.dir,
+        u.personas.map(p => p.empleado).join(" / "),
+        u.personas.map(p => p.horario).filter(Boolean).join(" / ")
+      ]));
+    }
     const csv = "﻿" + rows.map(row => row.map(csvCampo).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
