@@ -416,6 +416,7 @@ function getMaterialesSheet() {
     sheet.setFrozenColumns(1);
     sheet.setColumnWidth(1, 280);
   }
+  limpiezasMaterialesUnaVez_(sheet);
   return sheet;
 }
 
@@ -518,8 +519,8 @@ function setupMaterialesVista() {
 // pendientes de esa columna). Útil para dar de baja un servicio viejo cuya
 // columna quedó huérfana con pedidos trabados. Devuelve qué hizo.
 // EJECUTAR A MANO desde el editor (o con clasp run). No hace falta redeploy web.
-function limpiarColumnaMateriales(servicio) {
-  const sheet  = getMaterialesSheet();
+function limpiarColumnaMateriales(servicio, sheet) {
+  sheet = sheet || getMaterialesSheet();
   const lastCol = sheet.getLastColumn();
   const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const idx = header.indexOf(servicio);
@@ -547,6 +548,22 @@ function limpiarColumnaMateriales(servicio) {
 // Atajo run-once para la baja puntual pedida: limpia "Avellaneda".
 function limpiarAvellaneda() {
   return limpiarColumnaMateriales("Avellaneda");
+}
+
+// Limpiezas puntuales de UNA sola vez (bajas de columnas huérfanas). Como no
+// se puede correr una función suelta desde afuera (clasp run no aplica en este
+// proyecto), se disparan solas la primera vez que se toca la hoja de materiales
+// y se marcan como hechas en Script Properties para no repetirse ni agregar
+// costo luego. Borrar este mecanismo cuando ya no haga falta.
+function limpiezasMaterialesUnaVez_(sheet) {
+  const props = PropertiesService.getScriptProperties();
+  const KEY = "LIMPIEZAS_MATERIALES";
+  const hechas = (props.getProperty(KEY) || "").split(",").filter(String);
+  if (hechas.indexOf("avellaneda") === -1) {
+    try { limpiarColumnaMateriales("Avellaneda", sheet); } catch (e) { Logger.log(e); }
+    hechas.push("avellaneda");
+    props.setProperty(KEY, hechas.join(","));
+  }
 }
 
 // ---- "Historial Pedidos": log de cada pedido y cada recepción ----
