@@ -1033,7 +1033,7 @@
         horario: { texto: "Mar/Vie · 12:30–15:30", starts: { 2: "12:30", 5: "12:30" } } },
       { nombre: "Del Himno",    dir: "Del Himno 124, Haedo, Buenos Aires",
         horario: { texto: "Mar/Vie · 9–12", starts: { 2: "09:00", 5: "09:00" } } },
-      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires",
+      { nombre: "Garcia Silva", dir: "Garcia Silva 361, Morón, Buenos Aires", pausado: true,
         horario: { texto: "Lun/Jue · 12:30–15:30", starts: { 1: "12:30", 4: "12:30" } } },
       { nombre: "San Martín",   dir: "San Martín 88, Morón, Buenos Aires",
         horario: { texto: "Lun/Mié/Vie · 16–18", starts: { 1: "16:00", 3: "16:00", 5: "16:00" } } },
@@ -1116,8 +1116,11 @@
   }
 
   // ¿El servicio ya está vigente hoy? Un servicio con fecha de alta futura
-  // (`desde` = dd/MM/yyyy) NO se le muestra al empleado hasta esa fecha.
+  // (`desde` = dd/MM/yyyy) NO se le muestra al empleado hasta esa fecha. Un
+  // servicio `pausado` ("hasta nuevo aviso") tampoco: desaparece de las listas
+  // del empleado (fichar/materiales) pero sigue visible para el admin.
   function servicioActivoHoy(s) {
+    if (s && s.pausado) return false;
     if (!s || !s.desde) return true;
     const m = s.desde.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (!m) return true;
@@ -2702,7 +2705,7 @@
     listEl.innerHTML = adminServiciosActual.map((s, idx) => `
       <button class="service-card" onclick="adminSelectServicio(${idx})"${s.cobertura ? ' style="border-left-color:#0071A8;"' : ""}>
         <div>
-          <div class="s-nombre">${s.nombre}</div>
+          <div class="s-nombre">${s.nombre}${notaPausa(s.pausado)}</div>
           <div class="s-dir">${s.cobertura ? `🔁 Cubre a ${s.titular} · ${s.desde}→${s.hasta}`
                               : (s.custom ? "✍️ Dirección variable" : s.dir)}</div>
           ${s.horario && !s.cobertura ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
@@ -4134,7 +4137,8 @@
     const map = {};
     Object.keys(SERVICIOS).forEach(emp => (SERVICIOS[emp] || []).forEach(s => {
       const k = s.nombre;
-      if (!map[k]) map[k] = { nombre: s.nombre, dir: domicilioDe(s), personas: [], desde: s.desde || "" };
+      if (!map[k]) map[k] = { nombre: s.nombre, dir: domicilioDe(s), personas: [], desde: s.desde || "", pausado: false };
+      if (s.pausado) map[k].pausado = true;
       map[k].personas.push({ empleado: emp, horario: s.horario ? s.horario.texto : "" });
     }));
     return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -4144,6 +4148,13 @@
   function notaAlta(desde) {
     return (desde && !servicioActivoHoy({ desde }))
       ? `<span class="badge badge-extra" style="margin-left:6px;">arranca ${desde}</span>` : "";
+  }
+
+  // Nota "⏸️ en pausa" para un servicio pausado (oculto al empleado, visible
+  // al admin).
+  function notaPausa(pausado) {
+    return pausado
+      ? `<span class="badge badge-extra" style="margin-left:6px;background:#fed7aa;color:#9a3412;">⏸️ en pausa</span>` : "";
   }
 
   function renderAdminServiciosDom() {
@@ -4173,7 +4184,7 @@
           ${servs.length ? servs.map(s => `
             <div class="hist-row">
               <div>
-                <div class="hr-serv">${s.nombre}${notaAlta(s.desde)}</div>
+                <div class="hr-serv">${s.nombre}${notaAlta(s.desde)}${notaPausa(s.pausado)}</div>
                 <div class="hr-hora">📍 ${domicilioDe(s)}</div>
                 ${s.horario ? `<div class="hr-hora" style="color:#4f46e5;font-weight:700;">🕐 ${s.horario.texto}</div>` : ""}
               </div>
@@ -4187,7 +4198,7 @@
       cuerpo = unicos.map(u => `
         <div class="hist-row">
           <div>
-            <div class="hr-serv">${u.nombre}${notaAlta(u.desde)}</div>
+            <div class="hr-serv">${u.nombre}${notaAlta(u.desde)}${notaPausa(u.pausado)}</div>
             <div class="hr-hora">📍 ${u.dir}</div>
             ${u.personas.map(p => `<div class="hr-hora" style="color:#4f46e5;font-weight:600;">👤 ${p.empleado}${p.horario ? ` · 🕐 ${p.horario}` : ""}</div>`).join("")}
           </div>
@@ -4249,7 +4260,7 @@
     if (!emp) { servSel.innerHTML = `<option value="">-- Elegí empleado primero --</option>`; cfServicios = []; return; }
     servSel.innerHTML = `<option value="">⏳ Cargando servicios...</option>`;
     cfServicios = [
-      ...(SERVICIOS[emp] || []).map(s => ({ nombre: s.nombre, dir: s.dir, custom: false })),
+      ...(SERVICIOS[emp] || []).filter(s => !s.pausado).map(s => ({ nombre: s.nombre, dir: s.dir, custom: false })),
       { nombre: "Horas Extras", dir: "", custom: true },
       { nombre: "Suplencias",   dir: "", custom: true }
     ];

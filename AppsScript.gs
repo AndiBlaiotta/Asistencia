@@ -108,6 +108,16 @@ function servicioDesdeInt(empleado, servicio) {
   return f ? fechaAInt(f) : NaN;
 }
 
+// Servicios en pausa "hasta nuevo aviso": no se pueden fichar ni generan faltas,
+// pero siguen visibles en el panel de administradores (el front sigue mostrando
+// el servicio en SERVICIOS con `pausado: true`). Key = "Empleado|Servicio".
+const SERVICIOS_PAUSADOS = {
+  "Alejandro Jelvez|Garcia Silva": true
+};
+function servicioPausado(empleado, servicio) {
+  return SERVICIOS_PAUSADOS[empleado + "|" + servicio] === true;
+}
+
 // ---- Tiempo extra por fichada (salida más allá de la duración asignada) ----
 // Al marcar la SALIDA de un servicio regular, si (salida − entrada) supera la
 // duración programada del turno por al menos TIEMPO_EXTRA_MIN minutos, se
@@ -503,6 +513,42 @@ function setupMaterialesVista() {
   sheet.setFrozenColumns(2);
 }
 
+// Run-once: elimina por completo la columna de un servicio en la hoja
+// "Materiales y productos" (su encabezado + todos los pedidos/comprados
+// pendientes de esa columna). Útil para dar de baja un servicio viejo cuya
+// columna quedó huérfana con pedidos trabados. Devuelve qué hizo.
+// EJECUTAR A MANO desde el editor (o con clasp run). No hace falta redeploy web.
+function limpiarColumnaMateriales(servicio) {
+  const sheet  = getMaterialesSheet();
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const idx = header.indexOf(servicio);
+  if (idx === -1) {
+    const msg = 'No existe la columna "' + servicio + '" en Materiales y productos.';
+    Logger.log(msg);
+    return msg;
+  }
+  const col = idx + 1; // 1-indexed
+  // Cuento qué había pendiente (para el reporte) antes de borrar.
+  let pendientes = 0;
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    sheet.getRange(2, col, lastRow - 1, 1).getValues().forEach(r => {
+      if ((r[0] || "").toString().trim()) pendientes++;
+    });
+  }
+  sheet.deleteColumn(col);
+  const msg = 'Columna "' + servicio + '" eliminada (tenía ' + pendientes +
+              ' celda(s) con pedidos). Corré setupMaterialesVista() si querés reajustar la vista.';
+  Logger.log(msg);
+  return msg;
+}
+
+// Atajo run-once para la baja puntual pedida: limpia "Avellaneda".
+function limpiarAvellaneda() {
+  return limpiarColumnaMateriales("Avellaneda");
+}
+
 // ---- "Historial Pedidos": log de cada pedido y cada recepción ----
 function getHistorialPedidosSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -889,6 +935,7 @@ function detectarAusencias(empleado) {
     const fechaStr = Utilities.formatDate(d, tz, "dd/MM/yyyy");
     Object.keys(servHor).forEach(servicio => {
       if (!servHor[servicio][dow]) return;        // ese día no trabaja ese servicio
+      if (servicioPausado(empleado, servicio)) return; // servicio en pausa: no genera faltas
       const desdeServ = servicioDesdeInt(empleado, servicio);
       if (!isNaN(desdeServ) && fi < desdeServ) return; // antes del alta del servicio
       const key = servicio + "|" + fi;
@@ -2507,6 +2554,12 @@ function doGet(e) {
       if (!isNaN(desdeServ) && fechaAInt(fecha) < desdeServ) {
         return jsonOut({ status: "error",
           message: `El servicio "${servicio}" arranca el ${SERVICIOS_DESDE[empleado + "|" + servicio]}.` });
+      }
+
+      // Servicio en pausa: no se puede fichar (refuerza el ocultamiento del front).
+      if (servicioPausado(empleado, servicio)) {
+        return jsonOut({ status: "error",
+          message: `El servicio "${servicio}" está en pausa.` });
       }
 
       // Reglas A/B: no dos entradas seguidas ni una salida sin entrada previa.
