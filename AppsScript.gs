@@ -681,10 +681,6 @@ const HORARIOS = {
   }
 };
 
-// Margen para fichar la SALIDA después del fin de la ventana del turno.
-// (La ENTRADA ya no tiene límite de horario: se puede fichar tarde sin tope,
-// con motivo obligatorio.)
-const TOLERANCIA_DESPUES_MIN = 60;
 const DIAS_NOMBRE = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
 
 // Hora -> minutos desde la medianoche. Soporta 24h ("13:30:00") y 12h con
@@ -722,45 +718,20 @@ function diaDeSemana(fecha) {
   return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getDay();
 }
 
-// Valida que la fichada caiga en un día/horario que le corresponde al empleado
-// para ese servicio. Usa fecha/hora reportadas por el cliente (consistente con
-// el cálculo de tardanza, que también es client-side).
-// Para la SALIDA, el límite superior se calcula desde la ENTRADA real
-// (`entradaMin`, minutos desde medianoche): si el empleado entró tarde, tiene
-// derecho a cumplir el tiempo de permanencia del servicio y marcar la salida
-// más tarde (entrada + duración + tolerancia), sin quedar trabado. No hay
-// límite inferior para la salida: siempre se puede cerrar una entrada abierta.
+// Valida que la fichada caiga en un DÍA que le corresponde al empleado para ese
+// servicio. NO hay tope de hora ni para la entrada ni para la salida:
+//  - ENTRADA tarde: el cliente pide motivo obligatorio y queda marcada "Tarde".
+//  - SALIDA estirada: se registra "Tiempo extra" Pendiente para que el admin lo
+//    apruebe/anule (decisión 2026-10-14: el control es la aprobación del admin,
+//    no un bloqueo al fichar; antes la salida se trababa a los 60 min del fin e
+//    impedía registrar el tiempo extra que superara ese margen).
 // Devuelve { ok, message }.
-function validarHorarioFichada(empleado, servicio, fecha, hora, tipo, entradaMin) {
+function validarHorarioFichada(empleado, servicio, fecha, hora, tipo) {
   const servHor = (HORARIOS[empleado] || {})[servicio];
   if (!servHor) return { ok: true }; // sin horario definido (ej. Horas Extras) = libre
   const dow = diaDeSemana(fecha);
-  const rango = servHor[dow];
-  if (!rango) {
+  if (!servHor[dow]) {
     return { ok: false, message: `No tenés turno en "${servicio}" los ${DIAS_NOMBRE[dow] || "ese día"}.` };
-  }
-
-  // ENTRADA: sin límite de horario. Se puede fichar entrada a cualquier hora
-  // del día que le corresponde al servicio (si llegó tarde, el cliente le pide
-  // el motivo obligatorio y la fichada queda marcada "Tarde"). Solo se valida
-  // que el servicio funcione ese día.
-  if (tipo !== "Salida") return { ok: true };
-
-  // SALIDA: la ventana contempla la duración del servicio. Se calcula desde la
-  // ENTRADA real: puede salir hasta (entrada + duración del servicio) o el fin
-  // programado, lo que sea más tarde, con tolerancia. Sin límite inferior:
-  // siempre se puede cerrar una entrada abierta.
-  const min = horaAMin(hora);
-  if (isNaN(min)) return { ok: true }; // sin hora válida: no bloqueo por horario
-  const ini = horaAMin(rango[0]);
-  const fin = horaAMin(rango[1]);
-  const duracion = fin - ini;
-  let limite = fin;
-  if (entradaMin != null && !isNaN(entradaMin)) {
-    limite = Math.max(fin, entradaMin + duracion);
-  }
-  if (min > limite + TOLERANCIA_DESPUES_MIN) {
-    return { ok: false, message: `Fuera del horario de salida de "${servicio}".` };
   }
   return { ok: true };
 }
@@ -2613,14 +2584,15 @@ function doGet(e) {
           message: `Ya fichaste "${servicio}" hoy. Solo se puede una vez por día.` });
       }
 
-      // Regla C: día/horario. En la salida, la ventana se calcula desde la hora
-      // de la entrada abierta (permite salir más tarde si entró tarde).
+      // Regla C: solo se valida el DÍA (ni entrada ni salida tienen tope de
+      // hora). `entradaMin` (hora de la entrada abierta) se usa más abajo para
+      // calcular el tiempo extra de la salida, no para bloquear.
       const entradaMin = (tipo === "Salida" && ultima && ultima.tipo === "Entrada")
         ? horaAMin(ultima.hora) : null;
       // Si el empleado está cubriendo el servicio (vacaciones de otro), el
       // horario a validar es el del TITULAR de ese servicio, no el suyo.
       const empHor = empleadoHorarioEfectivo(empleado, servicio, fecha);
-      const vHor = validarHorarioFichada(empHor, servicio, fecha, hora, tipo, entradaMin);
+      const vHor = validarHorarioFichada(empHor, servicio, fecha, hora, tipo);
       if (!vHor.ok) {
         return jsonOut({ status: "error", message: vHor.message });
       }
