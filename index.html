@@ -566,7 +566,9 @@
         <div class="sb-nombre" id="sb-nombre"></div>
         <div class="sb-dir"    id="sb-dir"></div>
       </div>
-      <!-- Solo para "Horas Extras": el empleado escribe la dirección -->
+      <!-- Servicios libres (Horas Extras / Suplencias / Final de obra): el
+           empleado escribe la dirección. El texto del label lo pone cada
+           servicio vía `dirLabel` (ver renderRegistroTab). -->
       <div id="he-dir-wrap" style="display:none;">
         <label for="he-dir">Dirección donde hacés las horas extra</label>
         <input type="text" id="he-dir" placeholder="Ej: Av. Rivadavia 1234, Morón" oninput="onHeDirInput()" autocomplete="off">
@@ -1051,21 +1053,26 @@
   // toda la info disponible y un cartel "Sin asignar".
   const PENDIENTES = [];
 
-  // "Horas Extras" y "Suplencias" son servicios extra que tienen TODOS los
-  // empleados, por encima de los suyos. No tienen dirección fija: el empleado
-  // la escribe al fichar (marca `custom: true`). Se suman por código para no
-  // repetirlos en cada empleado de SERVICIOS. Backend: SERVICIOS_LIBRES.
-  const HORAS_EXTRAS = { nombre: "Horas Extras", custom: true };
-  const SUPLENCIAS   = { nombre: "Suplencias",   custom: true };
+  // Servicios "libres" que tienen TODOS los empleados, por encima de los suyos.
+  // No tienen dirección fija: el empleado la escribe al fichar (`custom: true`,
+  // con su propio `dirLabel`). Se fichan a cualquier hora, varias veces al día,
+  // y no generan faltas. Se suman por código para no repetirlos en cada empleado
+  // de SERVICIOS. El `nombre` es también lo que se guarda como servicio en la
+  // hoja. Backend: SERVICIOS_LIBRES (tocar ambos al agregar/renombrar uno).
+  const HORAS_EXTRAS = { nombre: "Horas Extras", custom: true, dirLabel: "Dirección donde hacés las horas extra" };
+  const SUPLENCIAS   = { nombre: "Suplencias de servicios fuera de TRAPO", custom: true, dirLabel: "Dirección de la suplencia" };
+  const FINAL_OBRA   = { nombre: "Final de obra", custom: true, dirLabel: "Dirección de la obra" };
+  const SERVICIOS_EXTRA = [HORAS_EXTRAS, SUPLENCIAS, FINAL_OBRA];
 
   // Dueños/administradores: pueden consultar las fichadas de cualquier
   // empleado. La validación real está en el servidor (ADMINS_HASH); esta
   // lista solo sirve para restaurar la sesión guardada del lado del cliente.
   const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 
-  // Servicios de un empleado: los suyos + "Horas Extras" y "Suplencias" al final.
+  // Servicios de un empleado: los suyos + los libres (Horas Extras, Suplencias,
+  // Final de obra) al final.
   function serviciosDe(empleado) {
-    return [...(SERVICIOS[empleado] || []), HORAS_EXTRAS, SUPLENCIAS];
+    return [...(SERVICIOS[empleado] || []), ...SERVICIOS_EXTRA];
   }
 
   // Coberturas ACTIVAS del empleado actual (servicios que cubre por vacaciones
@@ -1593,15 +1600,14 @@
     const btnS    = document.getElementById("btn-salida");
 
     if (selectedService.custom) {
-      // Horas Extras / Suplencias: ocultar dir fija, mostrar campo de dirección
-      // y bloquear Entrada/Salida hasta que escriban algo.
+      // Servicios libres (Horas Extras / Suplencias / Final de obra): ocultar dir
+      // fija, mostrar campo de dirección y bloquear Entrada/Salida hasta que
+      // escriban algo. El texto del campo lo trae cada servicio en `dirLabel`.
       dirEl.style.display = "none";
       heWrap.style.display = "block";
       heInput.value = "";
       document.querySelector("#he-dir-wrap label").textContent =
-        selectedService.nombre === "Suplencias"
-          ? "Dirección de la suplencia"
-          : "Dirección donde hacés las horas extra";
+        selectedService.dirLabel || "Dirección";
       btnE.disabled = btnS.disabled = true;
     } else {
       dirEl.style.display = "block";
@@ -3312,7 +3318,7 @@
       if (!vistos[s.nombre]) { vistos[s.nombre] = true; lista.push(s); }
     }));
     lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
-    return lista.concat([HORAS_EXTRAS, SUPLENCIAS]);
+    return lista.concat(SERVICIOS_EXTRA);
   }
 
   function openAdminServiciosLista() {
@@ -4286,8 +4292,7 @@
     servSel.innerHTML = `<option value="">⏳ Cargando servicios...</option>`;
     cfServicios = [
       ...(SERVICIOS[emp] || []).filter(s => !s.pausado).map(s => ({ nombre: s.nombre, dir: s.dir, custom: false })),
-      { nombre: "Horas Extras", dir: "", custom: true },
-      { nombre: "Suplencias",   dir: "", custom: true }
+      ...SERVICIOS_EXTRA.map(s => ({ nombre: s.nombre, dir: "", custom: true }))
     ];
     try {
       const j = await fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash });

@@ -177,8 +177,12 @@ const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 // Servicios "libres": sin horario fijo, con dirección variable escrita al
 // fichar, EXENTOS de la regla de una fichada por día (Regla D) y disponibles
 // para TODOS los empleados por encima de sus servicios. Duplicado a propósito
-// en index.html (front, como HORAS_EXTRAS/SUPLENCIAS). Cambiar = tocar ambos.
-const SERVICIOS_LIBRES = ["Horas Extras", "Suplencias"];
+// en index.html (front, como SERVICIOS_EXTRA). Cambiar = tocar ambos.
+// "Suplencias" (nombre viejo) se mantiene para que las fichadas históricas
+// guardadas con ese nombre sigan contando como libres (hoy el botón se llama
+// "Suplencias de servicios fuera de TRAPO").
+const SERVICIOS_LIBRES = ["Horas Extras", "Suplencias",
+                          "Suplencias de servicios fuera de TRAPO", "Final de obra"];
 
 // La contraseña caduca a los 90 días: en el próximo login el sistema obliga
 // a elegir una nueva.
