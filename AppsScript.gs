@@ -700,6 +700,21 @@ function horaAMin(hora) {
   return hh * 60 + Number(m[2]);
 }
 
+// Normaliza una hora a 24h "HH:mm:ss" (o "HH:mm" si no venía con segundos).
+// Tolera 12h con "a. m."/"p. m." que mandan los equipos sin datos de es-AR.
+// Red de seguridad server-side: aunque el cliente mande a./p. m., en la hoja
+// queda siempre 24h. Si no matchea, devuelve el original.
+function normalizarHora24(h) {
+  h = (h || "").toString().trim();
+  const m = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(h);
+  if (!m) return h;
+  let hh = Number(m[1]);
+  if (/p\.?\s*m/i.test(h) && hh < 12)  hh += 12;
+  if (/a\.?\s*m/i.test(h) && hh === 12) hh = 0;
+  const p2 = n => (n < 10 ? "0" + n : "" + n);
+  return p2(hh) + ":" + m[2] + (m[3] != null ? ":" + m[3] : "");
+}
+
 // Día de la semana (0=Dom … 6=Sáb) a partir de "d/M/yyyy" (formato es-AR).
 function diaDeSemana(fecha) {
   const m = (fecha || "").toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
@@ -1665,7 +1680,7 @@ function doGet(e) {
     }
     const servicio = (p.servicio || "").toString();
     const fecha    = (p.fecha || "").toString();
-    const hora     = (p.hora || "").toString();
+    const hora     = normalizarHora24((p.hora || "").toString());
     if (!servicio || !fecha || !hora) {
       return jsonOut({ status: "error", message: "Faltan datos (servicio, fecha u hora)" });
     }
@@ -2543,7 +2558,7 @@ function doGet(e) {
       const direccion = p.direccion || "";
       const tipo      = p.tipo;
       const fecha     = p.fecha     || "";
-      const hora      = p.hora      || "";
+      const hora      = normalizarHora24(p.hora || "");
       const lat       = p.lat       || "";
       const lon       = p.lon       || "";
       const precision = p.precision || "";

@@ -1141,7 +1141,7 @@
     try {
       const j = await fetchJson({
         action: "misCoberturas", empleado: currentUser, hash: currentHash,
-        fecha: new Date().toLocaleDateString("es-AR")
+        fecha: fechaDMY(new Date())
       });
       coberturasActivas = (j.status === "ok" && j.records) ? j.records : [];
     } catch (e) {
@@ -1526,10 +1526,9 @@
   function startClock() {
     function tick() {
       const now = new Date();
-      document.getElementById("display-hora").textContent =
-        now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      document.getElementById("display-hora").textContent = horaHMS(now);
       document.getElementById("display-fecha").textContent =
-        now.toLocaleDateString("es-AR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+        `${DIAS_LARGOS[now.getDay()]}, ${now.getDate()} de ${MESES_LARGOS[now.getMonth()]} de ${now.getFullYear()}`;
     }
     tick();
     clockInterval = setInterval(tick, 1000);
@@ -1723,8 +1722,8 @@
       servicio:  selectedService.nombre,
       direccion: direccion,
       tipo:      tipo,
-      fecha:     now.toLocaleDateString("es-AR"),
-      hora:      now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      fecha:     fechaDMY(now),
+      hora:      horaHMS(now),
       lat:       currentCoords ? currentCoords.lat : "",
       lon:       currentCoords ? currentCoords.lon : "",
       precision: currentCoords ? currentCoords.acc : "",
@@ -2090,7 +2089,7 @@
         <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
           <div>
             <div class="hr-serv">${tipoPermisoLabel(r.tipo)} · ${r.servicio}</div>
-            <div class="hr-hora">${r.fecha} · ${r.hora}${r.motivo ? " · " + r.motivo : ""}</div>
+            <div class="hr-hora">${r.fecha} · ${hora24(r.hora)}${r.motivo ? " · " + r.motivo : ""}</div>
           </div>
           ${vacEstadoBadge(r.estado)}
         </div>`).join("");
@@ -2115,7 +2114,7 @@
           <div class="hist-row ${r.tipo.toLowerCase()}">
             <div>
               <div class="hr-serv">${r.servicio}</div>
-              <div class="hr-hora">${r.hora}</div>
+              <div class="hr-hora">${hora24(r.hora)}</div>
               ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
             <div class="hr-right">
@@ -2328,7 +2327,7 @@
         <div class="hist-row ${ui.row}">
           <div>
             <div class="hr-serv">${r.producto}${uni}</div>
-            <div class="hr-hora">${r.fecha} ${r.hora} · ${r.empleado}</div>
+            <div class="hr-hora">${r.fecha} ${hora24(r.hora)} · ${r.empleado}</div>
           </div>
           <span class="badge ${ui.badge}">${r.accion}</span>
         </div>`;
@@ -2472,6 +2471,32 @@
     if (/a\.?\s*m/.test(h) && hh === 12) hh = 0;
     return hh * 3600 + (+m[2]) * 60 + (+(m[3] || 0));
   }
+
+  // ---------- FORMATO FIJO DE FECHA/HORA ----------
+  // Se construyen a mano para NO depender del locale del dispositivo: algunos
+  // equipos sin datos de "es-AR" caían en formato en-US (mm/dd/yyyy y a.m./p.m.).
+  // Siempre dd/MM/yyyy y 24h.
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function fechaDMY(d) { return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear(); }
+  function horaHMS(d) { return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds()); }
+
+  // Normaliza cualquier hora guardada a 24h (tolera a./p. m. de registros
+  // viejos y 24h ya correcto). Vacío -> "". Se usa al MOSTRAR, así el historial
+  // viejo también se ve en 24h.
+  function hora24(h) {
+    h = (h || "").toString().trim();
+    if (!h) return "";
+    const m = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(h);
+    if (!m) return h;
+    let hh = +m[1];
+    if (/p\.?\s*m/i.test(h) && hh < 12) hh += 12;
+    if (/a\.?\s*m/i.test(h) && hh === 12) hh = 0;
+    return pad2(hh) + ":" + m[2] + (m[3] != null ? ":" + m[3] : "");
+  }
+
+  const DIAS_LARGOS  = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
   // ---------- FILTRO REUTILIZABLE (empleado + período) ----------
   // Barra de filtros común a las vistas de admin: elegir un empleado (o todos)
@@ -2626,7 +2651,7 @@
           <div class="hist-row ${(r.tipo || "").toLowerCase()}">
             <div>
               <div class="hr-serv">${r.empleado}</div>
-              <div class="hr-hora">${r.servicio}${r.hora ? " · " + r.hora : ""}</div>
+              <div class="hr-hora">${r.servicio}${r.hora ? " · " + hora24(r.hora) : ""}</div>
               ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
             <div class="hr-right">
@@ -2883,7 +2908,7 @@
         <div class="hist-row ${ui.row}">
           <div>
             <div class="hr-serv">${r.producto}${uni}</div>
-            <div class="hr-hora">${r.fecha} ${r.hora} · ${r.empleado}</div>
+            <div class="hr-hora">${r.fecha} ${hora24(r.hora)} · ${r.empleado}</div>
           </div>
           <span class="badge ${ui.badge}">${r.accion}</span>
         </div>`;
@@ -2923,7 +2948,7 @@
         ${regs.map(r => `
           <div class="hist-row ${r.tipo.toLowerCase()}">
             <div>
-              <div class="hr-serv">${r.hora}</div>
+              <div class="hr-serv">${hora24(r.hora)}</div>
               ${mostrarDir && r.direccion ? `<div class="hr-hora">${r.direccion}</div>` : ``}
               ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
@@ -3041,7 +3066,7 @@
           <div class="hist-row ${ui.row}">
             <div>
               <div class="hr-serv">${r.producto}${uni}</div>
-              <div class="hr-hora">${r.empleado} · ${r.fecha}${r.hora ? " " + r.hora : ""}</div>
+              <div class="hr-hora">${r.empleado} · ${r.fecha}${r.hora ? " " + hora24(r.hora) : ""}</div>
             </div>
             <span class="badge ${ui.badge}">${r.accion}</span>
           </div>`;
@@ -3262,7 +3287,7 @@
             <div class="hist-row salida">
               <div>
                 <div class="hr-serv">${filtrado ? r.servicio : r.empleado}</div>
-                <div class="hr-hora">${filtrado ? r.hora : r.servicio + " · " + r.hora}${r.motivo ? " · 📝 " + r.motivo : ""}</div>
+                <div class="hr-hora">${filtrado ? hora24(r.hora) : r.servicio + " · " + hora24(r.hora)}${r.motivo ? " · 📝 " + r.motivo : ""}</div>
                 ${hor ? `<div class="hr-hora" style="color:#4f46e5;font-weight:700;">🕐 ${hor}</div>` : ""}
               </div>
               <div class="hr-right">
@@ -3380,7 +3405,7 @@
           <div class="hist-row ${(r.tipo || "").toLowerCase()}">
             <div>
               <div class="hr-serv">${r.empleado}</div>
-              <div class="hr-hora">${r.hora}${r.direccion ? " · " + r.direccion : ""}</div>
+              <div class="hr-hora">${hora24(r.hora)}${r.direccion ? " · " + r.direccion : ""}</div>
               ${r.motivo ? `<div class="hr-hora" style="color:#b45309;font-weight:600;">📝 ${r.motivo}</div>` : ``}
             </div>
             <div class="hr-right">
@@ -3511,7 +3536,7 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div>
               <div class="s-nombre">${pm.empleado}</div>
-              <div class="s-dir">${tipoPermisoLabel(pm.tipo)} · ${pm.servicio} · ${pm.fecha} · ${pm.hora}${pm.motivo ? " · " + pm.motivo : ""}</div>
+              <div class="s-dir">${tipoPermisoLabel(pm.tipo)} · ${pm.servicio} · ${pm.fecha} · ${hora24(pm.hora)}${pm.motivo ? " · " + pm.motivo : ""}</div>
             </div>
             ${vacEstadoBadge(pm.estado)}
           </div>
@@ -3791,7 +3816,7 @@
     return `<div class="mat-item" style="flex-direction:column;align-items:stretch;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div><div class="mat-nombre">${r.fecha} · ${r.servicio}</div>
-             <div class="mat-fecha">${r.entrada} → ${r.salida} · <b>+${fmtMinutos(r.minutos)}</b> extra</div></div>
+             <div class="mat-fecha">${hora24(r.entrada)} → ${hora24(r.salida)} · <b>+${fmtMinutos(r.minutos)}</b> extra</div></div>
         ${teBadge(r.estado)}
       </div>
       <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${acciones}</div>
