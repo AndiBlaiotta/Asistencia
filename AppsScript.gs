@@ -182,7 +182,8 @@ const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 // guardadas con ese nombre sigan contando como libres (hoy el botón se llama
 // "Suplencias de servicios fuera de TRAPO").
 const SERVICIOS_LIBRES = ["Horas Extras", "Suplencias",
-                          "Suplencias de servicios fuera de TRAPO", "Final de obra"];
+                          "Suplencias de servicios fuera de TRAPO", "Final de obra",
+                          "Servicios extra dentro del horario"];
 
 // La contraseña caduca a los 90 días: en el próximo login el sistema obliga
 // a elegir una nueva.
@@ -1078,11 +1079,15 @@ function lunesDeSemana(date) {
   d.setHours(0, 0, 0, 0);
   return d;
 }
-// Horas extra por mes de un empleado. Trabajadas = duración PROGRAMADA de los
-// turnos regulares a los que fichó entrada (la tardanza no descuenta) + duración
-// REAL (entrada→salida) de "Horas Extras"/"Suplencias". Extra semanal = max(0,
-// trabajadas − contrato); se suma por mes (mes del lunes de esa semana). Las
-// tardanzas se cuentan aparte (señaladas, no descontadas). Mira ~120 días atrás.
+// Horas extra por mes de un empleado. El ÚNICO concepto de "extra" es el
+// excedente semanal: se suman todas las horas trabajadas de la semana (turnos
+// regulares por su duración PROGRAMADA —la tardanza no descuenta— + libres por
+// su duración REAL entrada→salida, incluido lo fichado en domingo/feriado) y el
+// extra = max(0, trabajadas − contrato), por mes (mes del lunes de esa semana).
+// Ninguna fichada es "extra" por sí sola por el botón que se usó. Domingo y
+// feriado trabajados NO suman extra aparte: solo se cuentan (horas y cantidad de
+// DÍAS) para poder destacarlos. Las tardanzas se cuentan aparte (señaladas, no
+// descontadas). Mira ~120 días atrás.
 function horasExtraDe(empleado) {
   const servHor = HORARIOS[empleado] || {};
   const contrato = horasContratoSemanal(empleado);
@@ -1095,11 +1100,11 @@ function horasExtraDe(empleado) {
   const minInt = desde.getFullYear() * 10000 + (desde.getMonth() + 1) * 100 + desde.getDate();
 
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
-  const weekWorked = {};   // wkInt -> minutos trabajados (días normales)
+  const weekWorked = {};   // wkInt -> minutos trabajados (TODOS los días: regular programado + libre real)
   const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
   const tardMes    = {};   // "yyyy-MM" -> cantidad de tardanzas
-  const extras     = {};   // días normales, libres: "servicio|fi" -> {ent, sal, wk}
-  const special    = {};   // domingo/feriado, TODO servicio: "servicio|fi" -> {ent, sal, mes, tipo}
+  const libres     = {};   // "servicio|fi" -> {ent, sal, wk}  (libres, todos los días)
+  const marca      = {};   // "servicio|fi" -> {ent, sal, mes, tipo}  domingo/feriado (solo para destacar/contar)
 
   data.forEach(row => {
     const fechaStr = fmtCell(row[0]);
@@ -1122,32 +1127,33 @@ function horasExtraDe(empleado) {
 
     const hm = horaAMin(fmtCell(row[4]));
 
-    // Domingo o feriado: TODO lo trabajado ese día es extra (duración real).
-    const feriado = esFeriado(fi);
-    if (feriado || dow === 0) {
-      const key = servicio + "|" + fi;
-      const s = special[key] || (special[key] = { ent: [], sal: [], mes: mesF, tipo: feriado ? "feriado" : "domingo" });
-      if (!isNaN(hm)) (tipo === "Entrada" ? s.ent : s.sal).push(hm);
-      return;
-    }
-
+    // Horas trabajadas de la semana (base del excedente). Cuentan SIEMPRE, sea
+    // día normal, domingo o feriado: el regular por su duración programada, los
+    // libres por su duración real.
     if (servHor[servicio]) {
-      // Regular: al fichar entrada en un día con turno, cuenta la duración programada.
       if (tipo === "Entrada" && servHor[servicio][dow]) {
         const dur = horaAMin(servHor[servicio][dow][1]) - horaAMin(servHor[servicio][dow][0]);
         if (!isNaN(dur) && dur > 0) weekWorked[wk] = (weekWorked[wk] || 0) + dur;
       }
     } else if (SERVICIOS_LIBRES.indexOf(servicio) !== -1) {
-      // Libre: se guarda para emparejar entrada→salida y contar la duración real.
       const key = servicio + "|" + fi;
-      const e = extras[key] || (extras[key] = { ent: [], sal: [], wk: wk });
+      const e = libres[key] || (libres[key] = { ent: [], sal: [], wk: wk });
       if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
+    }
+
+    // Domingo/feriado trabajado: NO suma extra aparte (ya está en el total
+    // semanal); solo se registra para contar horas y cantidad de días.
+    const feriado = esFeriado(fi);
+    if (feriado || dow === 0) {
+      const key = servicio + "|" + fi;
+      const s = marca[key] || (marca[key] = { ent: [], sal: [], mes: mesF, tipo: feriado ? "feriado" : "domingo" });
+      if (!isNaN(hm)) (tipo === "Entrada" ? s.ent : s.sal).push(hm);
     }
   });
 
-  // Emparejar entrada→salida de los libres en días normales.
-  Object.keys(extras).forEach(k => {
-    const e = extras[k];
+  // Emparejar entrada→salida de los libres (todos los días) -> suma al total semanal.
+  Object.keys(libres).forEach(k => {
+    const e = libres[k];
     e.ent.sort((a, b) => a - b); e.sal.sort((a, b) => a - b);
     const n = Math.min(e.ent.length, e.sal.length);
     for (let i = 0; i < n; i++) {
@@ -1156,20 +1162,22 @@ function horasExtraDe(empleado) {
     }
   });
 
-  // Emparejar los de domingo/feriado (todo servicio) -> horas extra fijas por mes.
-  const specialMes = {}; // "yyyy-MM" -> { domingo, feriado } en horas
-  Object.keys(special).forEach(k => {
-    const s = special[k];
+  // Domingo/feriado: horas y cantidad de DÍAS trabajados por mes (solo informativo).
+  const specialMes = {}; // "yyyy-MM" -> { domingoH, feriadoH, domingoDias:{}, feriadoDias:{} }
+  Object.keys(marca).forEach(k => {
+    const s = marca[k];
     s.ent.sort((a, b) => a - b); s.sal.sort((a, b) => a - b);
     const n = Math.min(s.ent.length, s.sal.length);
     let tot = 0;
     for (let i = 0; i < n; i++) { const dur = s.sal[i] - s.ent[i]; if (dur > 0) tot += dur; }
-    const o = specialMes[s.mes] || (specialMes[s.mes] = { domingo: 0, feriado: 0 });
-    o[s.tipo] += tot / 60;
+    const fi = k.split("|")[1];
+    const o = specialMes[s.mes] || (specialMes[s.mes] = { domingoH: 0, feriadoH: 0, domingoDias: {}, feriadoDias: {} });
+    if (s.tipo === "feriado") { o.feriadoH += tot / 60; o.feriadoDias[fi] = true; }
+    else                      { o.domingoH += tot / 60; o.domingoDias[fi] = true; }
   });
 
-  const mes = {}; // "yyyy-MM" -> {overtime, trabajadas, domingo, feriado, tardanzas}
-  function bucket(m) { return mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, domingo: 0, feriado: 0, tardanzas: 0 }); }
+  const mes = {}; // "yyyy-MM" -> {overtime, trabajadas, domingo, feriado, domingoDias, feriadoDias, tardanzas}
+  function bucket(m) { return mes[m] || (mes[m] = { overtime: 0, trabajadas: 0, domingo: 0, feriado: 0, domingoDias: 0, feriadoDias: 0, tardanzas: 0 }); }
 
   Object.keys(weekWorked).forEach(wk => {
     const workedH = weekWorked[wk] / 60;
@@ -1179,36 +1187,39 @@ function horasExtraDe(empleado) {
   });
   Object.keys(specialMes).forEach(m => {
     const o = bucket(m);
-    o.domingo    += specialMes[m].domingo;
-    o.feriado    += specialMes[m].feriado;
-    o.overtime   += specialMes[m].domingo + specialMes[m].feriado;
-    o.trabajadas += specialMes[m].domingo + specialMes[m].feriado;
+    o.domingo     += specialMes[m].domingoH;
+    o.feriado     += specialMes[m].feriadoH;
+    o.domingoDias += Object.keys(specialMes[m].domingoDias).length;
+    o.feriadoDias += Object.keys(specialMes[m].feriadoDias).length;
   });
   Object.keys(tardMes).forEach(m => { bucket(m).tardanzas += tardMes[m]; });
 
   const r1 = x => Math.round(x * 10) / 10;
   return Object.keys(mes).sort().reverse().map(m => ({
     mes: m,
-    overtime:   r1(mes[m].overtime),
-    trabajadas: r1(mes[m].trabajadas),
-    domingo:    r1(mes[m].domingo),
-    feriado:    r1(mes[m].feriado),
-    tardanzas:  mes[m].tardanzas
+    overtime:    r1(mes[m].overtime),
+    trabajadas:  r1(mes[m].trabajadas),
+    domingo:     r1(mes[m].domingo),
+    feriado:     r1(mes[m].feriado),
+    domingoDias: mes[m].domingoDias,
+    feriadoDias: mes[m].feriadoDias,
+    tardanzas:   mes[m].tardanzas
   }));
 }
 
 // ---- Novedades por empleado (para la planilla mensual) ----
-// Detalle DÍA POR DÍA de lo que cuenta como extra, con entrada→salida real:
+// Detalle DÍA POR DÍA de lo que hay que destacar, con entrada→salida real:
 //  - "Feriado": trabajó un feriado nacional (cualquier servicio).
-//  - "Domingo": trabajó un domingo no feriado (cualquier servicio).
-//  - "Horas extra": fichó en un servicio libre ("Horas Extras"/"Suplencias")
-//    en un día normal.
+//  - "Domingo": trabajó un domingo (cualquier servicio).
+// Feriado/domingo NO son "extra" aparte (sus horas ya entran en el total
+// semanal); la fila existe solo para poder CONTAR cuántos días de feriado/
+// domingo se trabajaron. Las fichadas en servicios libres de día normal NO
+// generan fila propia: no son extra por sí solas, solo suman al total semanal.
 // Cada fila trae fecha, servicio, desde/hasta (minutos desde medianoche) y
-// duración en minutos. Un día con varias entrada/salida da varias filas.
-// Aparte, `excedente` = por mes, las horas trabajadas por ENCIMA del contrato
-// semanal (parte semanal, SIN feriado/domingo, que ya van como filas de día);
-// no tiene hora desde/hasta (es un neto semanal). Lee toda la hoja (todos los
-// meses). Los empleados sin nada devuelven listas vacías (= "sin novedades").
+// duración en minutos. Aparte, `excedente` = por mes, las horas trabajadas por
+// ENCIMA del contrato semanal (lo único que es horas extra); no tiene hora
+// desde/hasta (es un neto semanal). Lee toda la hoja (todos los meses). Los
+// empleados sin nada devuelven listas vacías (= "sin novedades").
 function novedadesDe(empleado) {
   const servHor = HORARIOS[empleado] || {};
   const contrato = horasContratoSemanal(empleado);
@@ -1218,10 +1229,10 @@ function novedadesDe(empleado) {
   const tz = Session.getScriptTimeZone();
 
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
-  const weekWorked = {};   // wkInt -> minutos (días normales: regular programado + libre real)
+  const weekWorked = {};   // wkInt -> minutos (todos los días: regular programado + libre real)
   const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
   const especiales = {};   // "tipo|servicio|fi" -> { fecha, fi, servicio, tipo, mes, ent:[], sal:[] }
-  const libres     = {};   // "servicio|fi" -> { fecha, fi, servicio, mes, wk, ent:[], sal:[] }
+  const libres     = {};   // "servicio|fi" -> { wk, ent:[], sal:[] }  (suma al total; sin fila de día)
 
   data.forEach(row => {
     const fechaStr = fmtCell(row[0]);
@@ -1238,7 +1249,20 @@ function novedadesDe(empleado) {
     weekMonth[wk] = Utilities.formatDate(lunes, tz, "yyyy-MM");
     const hm = horaAMin(fmtCell(row[4]));
 
-    // Domingo o feriado: todo lo del día es novedad (duración real).
+    // Total semanal (base del excedente): regular por duración programada, libres
+    // por duración real. Cuenta todos los días (incluido domingo/feriado).
+    if (servHor[servicio]) {
+      if (tipo === "Entrada" && servHor[servicio][dow]) {
+        const dur = horaAMin(servHor[servicio][dow][1]) - horaAMin(servHor[servicio][dow][0]);
+        if (!isNaN(dur) && dur > 0) weekWorked[wk] = (weekWorked[wk] || 0) + dur;
+      }
+    } else if (SERVICIOS_LIBRES.indexOf(servicio) !== -1) {
+      const key = servicio + "|" + fi;
+      const e = libres[key] || (libres[key] = { wk, ent: [], sal: [] });
+      if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
+    }
+
+    // Domingo o feriado trabajado: fila de día destacada (para contar los días).
     const feriado = esFeriado(fi);
     if (feriado || dow === 0) {
       const t = feriado ? "Feriado" : "Domingo";
@@ -1246,39 +1270,22 @@ function novedadesDe(empleado) {
       const s = especiales[key] || (especiales[key] =
         { fecha: fechaStr, fi, servicio, tipo: t, mes: mesF, ent: [], sal: [] });
       if (!isNaN(hm)) (tipo === "Entrada" ? s.ent : s.sal).push(hm);
-      return;
-    }
-
-    if (servHor[servicio]) {
-      // Regular: al fichar entrada, cuenta la duración programada (para excedente).
-      if (tipo === "Entrada" && servHor[servicio][dow]) {
-        const dur = horaAMin(servHor[servicio][dow][1]) - horaAMin(servHor[servicio][dow][0]);
-        if (!isNaN(dur) && dur > 0) weekWorked[wk] = (weekWorked[wk] || 0) + dur;
-      }
-    } else if (SERVICIOS_LIBRES.indexOf(servicio) !== -1) {
-      const key = servicio + "|" + fi;
-      const e = libres[key] || (libres[key] =
-        { fecha: fechaStr, fi, servicio, mes: mesF, wk, ent: [], sal: [] });
-      if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
     }
   });
 
-  const dias = [];
-  // Libres (día normal) -> filas "Horas extra"; su duración real suma al excedente.
+  // Libres -> suma al total semanal (sin fila de día: no son extra por sí solos).
   Object.keys(libres).forEach(k => {
     const e = libres[k];
     e.ent.sort((a, b) => a - b); e.sal.sort((a, b) => a - b);
     const n = Math.min(e.ent.length, e.sal.length);
     for (let i = 0; i < n; i++) {
       const dur = e.sal[i] - e.ent[i];
-      if (dur > 0) {
-        weekWorked[e.wk] = (weekWorked[e.wk] || 0) + dur;
-        dias.push({ mes: e.mes, fecha: e.fecha, fi: e.fi, servicio: e.servicio,
-                    tipo: "Horas extra", desde: e.ent[i], hasta: e.sal[i], minutos: dur });
-      }
+      if (dur > 0) weekWorked[e.wk] = (weekWorked[e.wk] || 0) + dur;
     }
   });
-  // Feriado/domingo -> filas de día.
+
+  const dias = [];
+  // Feriado/domingo -> filas de día destacadas.
   Object.keys(especiales).forEach(k => {
     const s = especiales[k];
     s.ent.sort((a, b) => a - b); s.sal.sort((a, b) => a - b);
@@ -1291,7 +1298,7 @@ function novedadesDe(empleado) {
   });
   dias.sort((a, b) => a.fi - b.fi || a.desde - b.desde);
 
-  // Excedente semanal por mes (parte sobre contrato; sin feriado/domingo).
+  // Excedente semanal por mes (lo único que es horas extra).
   const exMes = {};
   Object.keys(weekWorked).forEach(wk => {
     const over = Math.max(0, weekWorked[wk] / 60 - contrato);
@@ -1568,6 +1575,24 @@ function doGet(e) {
           meses:    horasExtraDe(e)
         }));
         return { status: "ok", records };
+      });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- MIS HORAS: el empleado ve SUS propias horas por mes (trabajadas,
+  // excedente sobre el contrato, domingos/feriados trabajados). Misma lógica que
+  // adminHorasExtra pero acotada al empleado autenticado. ----
+  if (p.action === "misHorasExtra" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      return jsonOut({
+        status: "ok",
+        contrato: horasContratoSemanal(p.empleado),
+        meses: horasExtraDe(p.empleado)
       });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });

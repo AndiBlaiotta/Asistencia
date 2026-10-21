@@ -602,8 +602,9 @@
 
   <!-- TAB: HISTORIAL -->
   <div id="tab-historial">
+    <div id="hist-horas"></div>
     <div id="hist-faltas"></div>
-    <button class="btn-refresh" onclick="cargarHistorial()">🔄 Actualizar historial</button>
+    <button class="btn-refresh" onclick="misHorasCache=null; cargarMisHoras(); cargarHistorial()">🔄 Actualizar historial</button>
     <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
   </div>
 
@@ -1062,7 +1063,8 @@
   const HORAS_EXTRAS = { nombre: "Horas Extras", custom: true, dirLabel: "Dirección donde hacés las horas extra" };
   const SUPLENCIAS   = { nombre: "Suplencias de servicios fuera de TRAPO", custom: true, dirLabel: "Dirección de la suplencia" };
   const FINAL_OBRA   = { nombre: "Final de obra", custom: true, dirLabel: "Dirección de la obra" };
-  const SERVICIOS_EXTRA = [HORAS_EXTRAS, SUPLENCIAS, FINAL_OBRA];
+  const EXTRA_HORARIO = { nombre: "Servicios extra dentro del horario", custom: true, dirLabel: "Dirección del servicio extra" };
+  const SERVICIOS_EXTRA = [HORAS_EXTRAS, SUPLENCIAS, FINAL_OBRA, EXTRA_HORARIO];
 
   // Dueños/administradores: pueden consultar las fichadas de cualquier
   // empleado. La validación real está en el servidor (ADMINS_HASH); esta
@@ -1245,6 +1247,50 @@
                  ${r.motivo ? `<div class="hr-hora">📝 ${r.motivo}</div>` : ""}</div>
             ${ausenciaBadge(r.clasificacion)}
           </div>`).join("")}
+        </div>`;
+      }).join("")}`;
+  }
+
+  // ---- Mis horas: lo que ve el empleado de sus propias horas por mes ----
+  // Trabajadas (todo lo fichado), horas extra = excedente sobre el contrato, y
+  // cuántos domingos/feriados trabajó. Misma lógica que la vista del admin.
+  let misHorasCache = null;
+
+  async function cargarMisHoras() {
+    const el = document.getElementById("hist-horas");
+    if (!el) return;
+    if (misHorasCache) { renderMisHoras(); return; }
+    el.innerHTML = `<div class="hist-loading">⏳ Calculando tus horas...</div>`;
+    try {
+      const j = await fetchJson({ action: "misHorasExtra", empleado: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      misHorasCache = { contrato: j.contrato, meses: j.meses || [] };
+      renderMisHoras();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function renderMisHoras() {
+    const el = document.getElementById("hist-horas");
+    if (!el) return;
+    const data = misHorasCache;
+    if (!data || !data.meses.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `
+      <div class="section-title">Mis horas por mes</div>
+      <div style="font-size:12px;color:var(--gray);margin-bottom:6px;">Contrato: ${data.contrato} hs/semana. Las horas extra son lo trabajado por encima del contrato.</div>
+      ${data.meses.map(m => {
+        const notas = [];
+        if (m.feriadoDias) notas.push(`🎌 ${m.feriadoDias} feriado${m.feriadoDias > 1 ? "s" : ""} trabajado${m.feriadoDias > 1 ? "s" : ""}`);
+        if (m.domingoDias) notas.push(`🗓️ ${m.domingoDias} domingo${m.domingoDias > 1 ? "s" : ""} trabajado${m.domingoDias > 1 ? "s" : ""}`);
+        const sub = `trabajaste ~${m.trabajadas} hs${notas.length ? " · " + notas.join(" · ") : ""}`;
+        return `
+        <div class="hist-row ${m.overtime > 0 ? "salida" : ""}">
+          <div>
+            <div class="hr-serv">${mesLabel(m.mes)}</div>
+            <div class="hr-hora">${sub}</div>
+          </div>
+          <span class="badge ${m.overtime > 0 ? "badge-tarde" : "badge-entrada"}">${m.overtime} hs extra</span>
         </div>`;
       }).join("")}`;
   }
@@ -1509,6 +1555,7 @@
     permisosHoy = [];
     misVacacionesSaldo = null;
     misAusencias = [];
+    misHorasCache = null;
     ausenciasQueue = [];
     cerrarAusencia();
     adminRecordsCache = { empleado: null, records: null };
@@ -1772,7 +1819,7 @@
       document.getElementById("tab-" + t).style.display = tab === t ? "block" : "none";
       document.getElementById("tbtn-" + t).classList.toggle("active", tab === t);
     });
-    if (tab === "historial")  { renderMisFaltas(); cargarHistorial(); }
+    if (tab === "historial")  { renderMisFaltas(); cargarMisHoras(); cargarHistorial(); }
     if (tab === "materiales") renderMaterialesTab();
     if (tab === "vacaciones") { llenarPermServicios(); onPermTipo(); cargarMisVacaciones(); cargarMisPermisos(); }
   }
@@ -2384,7 +2431,7 @@
     previewMode = true;
     currentUser = emp;                 // la UI de empleado lee currentUser
     selectedService = null;
-    coberturasActivas = []; permisosHoy = []; misAusencias = []; ausenciasQueue = [];
+    coberturasActivas = []; permisosHoy = []; misAusencias = []; misHorasCache = null; ausenciasQueue = [];
     document.getElementById("preview-emp-nombre").textContent = emp;
     const banner = document.getElementById("preview-banner");
     banner.style.display = "flex";
@@ -3932,8 +3979,8 @@
         <div class="hist-day-label">${r.empleado} · contrato ${r.contrato} hs/sem</div>
         ${r.meses.length ? r.meses.map(m => {
           const notas = [];
-          if (m.domingo)   notas.push(`🗓️ ${m.domingo} hs domingo`);
-          if (m.feriado)   notas.push(`🎌 ${m.feriado} hs feriado`);
+          if (m.feriadoDias) notas.push(`🎌 ${m.feriadoDias} feriado${m.feriadoDias > 1 ? "s" : ""} trabajado${m.feriadoDias > 1 ? "s" : ""}`);
+          if (m.domingoDias) notas.push(`🗓️ ${m.domingoDias} domingo${m.domingoDias > 1 ? "s" : ""} trabajado${m.domingoDias > 1 ? "s" : ""}`);
           if (m.tardanzas) notas.push(`⚠️ ${m.tardanzas} tarde (no descontadas)`);
           const sub = `trabajó ~${m.trabajadas} hs${notas.length ? " · " + notas.join(" · ") : ""}`;
           return `
