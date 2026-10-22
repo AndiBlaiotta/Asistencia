@@ -112,7 +112,6 @@ function servicioDesdeInt(empleado, servicio) {
 // pero siguen visibles en el panel de administradores (el front sigue mostrando
 // el servicio en SERVICIOS con `pausado: true`). Key = "Empleado|Servicio".
 const SERVICIOS_PAUSADOS = {
-  "Alejandro Jelvez|Garcia Silva": true
 };
 function servicioPausado(empleado, servicio) {
   return SERVICIOS_PAUSADOS[empleado + "|" + servicio] === true;
