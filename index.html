@@ -369,6 +369,8 @@
     .btn-recibido { background: #dcfce7; color: #16a34a; border: 1.5px solid #bbf7d0; }
     .btn-comprado { background: #dbeafe; color: #2563eb; border: 1.5px solid #bfdbfe; }
     .btn-anular   { background: #fee2e2; color: #dc2626; border: 1.5px solid #fecaca; margin-top: 6px; }
+    .sup-nivel     { flex: 1; min-width: 70px; background: #f1f5f9; color: #334155; border: 1.5px solid #e2e8f0; }
+    .sup-nivel.sel { background: var(--cyan); color: #fff; border-color: var(--cyan); }
     /* Selector de cantidad (empleado, al pedir) */
     .mat-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     .qty-box { display: flex; align-items: center; border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -532,6 +534,13 @@
     <button class="btn btn-cambiar" style="margin:0;width:auto;flex-shrink:0;" onclick="salirVistaPrevia()">↩ Salir de la vista previa</button>
   </div>
 
+  <div id="sup-demo-banner" style="display:none;background:#cffafe;color:#155e75;font-weight:800;
+       border-radius:12px;padding:10px 14px;margin-bottom:14px;
+       align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+    <span>🔍 Demo de Supervisor — así se vería. En modo prueba NO se guardan datos.</span>
+    <button class="btn btn-cambiar" style="margin:0;width:auto;flex-shrink:0;" onclick="salirSupervisorDemo()">↩ Volver al panel admin</button>
+  </div>
+
   <!-- Header con nombre y reloj -->
   <div class="user-header">
     <div class="mini-logo">
@@ -549,6 +558,7 @@
     <button class="tab-btn"        id="tbtn-materiales" onclick="switchTab('materiales')">📦 Materiales</button>
     <button class="tab-btn"        id="tbtn-historial"  onclick="switchTab('historial')">📋 Historial</button>
     <button class="tab-btn"        id="tbtn-vacaciones" onclick="switchTab('vacaciones')">🏖️ Licencias</button>
+    <button class="tab-btn"        id="tbtn-supervision" onclick="switchTab('supervision')" style="display:none;">🔍 Supervisión</button>
   </div>
 
   <!-- TAB: REGISTRAR -->
@@ -606,6 +616,54 @@
     <div id="hist-faltas"></div>
     <button class="btn-refresh" onclick="misHorasCache=null; cargarMisHoras(); cargarHistorial()">🔄 Actualizar historial</button>
     <div id="hist-content"><div class="hist-empty">Tocá "Actualizar historial" para ver tus registros.</div></div>
+  </div>
+
+  <!-- TAB: SUPERVISIÓN (solo supervisores) -->
+  <div id="tab-supervision">
+    <div class="sup-subtabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+      <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('visitas')">📝 Visitas</button>
+      <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('materiales')">🚚 Retirar materiales</button>
+      <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('fichadas')">🕐 Fichadas</button>
+    </div>
+
+    <!-- Visitas: semáforo semanal + formulario de checklist -->
+    <div id="sup-view-visitas">
+      <div class="section-title">Visitas de esta semana</div>
+      <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Tenés que visitar cada servicio 1 vez por semana. Verde = ya visitado esta semana · Rojo = pendiente.</div>
+      <div id="sup-visitas-list"><div class="hist-loading">⏳ Cargando...</div></div>
+    </div>
+
+    <!-- Formulario de checklist de una visita -->
+    <div id="sup-view-form" style="display:none;">
+      <button class="btn btn-cambiar" onclick="supShowView('visitas')">↩ Volver</button>
+      <div class="selected-banner">
+        <div class="sb-label">Supervisando</div>
+        <div class="sb-nombre" id="sup-form-serv"></div>
+        <div class="sb-dir" id="sup-form-dir"></div>
+      </div>
+      <div id="sup-loc-status" class="loc-status">📍 Obteniendo ubicación...</div>
+      <div id="sup-checklist"></div>
+      <label for="sup-obs" style="margin-top:10px;">Observaciones (opcional)</label>
+      <textarea id="sup-obs" rows="3" placeholder="Ej: faltan trapos, el baño quedó impecable..." style="width:100%;"></textarea>
+      <button class="btn btn-entrada" id="sup-guardar" onclick="guardarSupervision()">✅ Guardar visita</button>
+      <div id="sup-form-msg" class="success" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- Materiales para retirar -->
+    <div id="sup-view-materiales" style="display:none;">
+      <div class="section-title">Materiales comprados para retirar</div>
+      <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Lo que el admin ya compró. Marcá "Retirado" cuando lo levantás; el empleado confirma "Recibido" cuando se lo dejás.</div>
+      <button class="btn-refresh" onclick="cargarSupComprados()">🔄 Actualizar</button>
+      <div id="sup-mat-list"><div class="hist-loading">⏳ Cargando...</div></div>
+    </div>
+
+    <!-- Ver fichadas de empleados -->
+    <div id="sup-view-fichadas" style="display:none;">
+      <div class="section-title">Fichadas de los empleados</div>
+      <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Para controlar que lleguen y se vayan en horario.</div>
+      <select id="sup-fich-emp" onchange="cargarSupFichadas()" style="width:100%;margin-bottom:10px;"></select>
+      <div id="sup-fich-list"></div>
+    </div>
   </div>
 
   <!-- TAB: LICENCIAS (vacaciones + otras licencias + permisos) -->
@@ -690,6 +748,7 @@
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminTiempoExtra()">⏱️ Tiempo extra a aprobar</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminNovedades()">📄 Planilla de novedades</button>
       <button class="btn btn-primary admin-sub-btn" onclick="openAdminCargarFichada()">✍️ Cargar fichada</button>
+      <button class="btn btn-primary admin-sub-btn" onclick="openAdminSupervisiones()">🔍 Supervisiones</button>
     </div>
 
     <!-- Materiales y compras (directo) -->
@@ -710,10 +769,14 @@
     <!-- Vista previa: ver la app tal como la ve un empleado (modo prueba) -->
     <div class="section-title">👁️ Ver la app como un empleado</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Modo prueba: navegás la app como la ve el empleado elegido. No se registran datos.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:18px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
       <select id="preview-emp-sel" style="flex:1;min-width:160px;"></select>
       <button class="btn btn-primary" style="margin:0;width:auto;flex-shrink:0;" onclick="iniciarVistaPrevia()">👁️ Ver</button>
     </div>
+
+    <div class="section-title">🔍 Ver como supervisor (prueba)</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Modo prueba del acceso de supervisor (visitas, checklist, retirar materiales, ver fichadas). No se guardan datos. Todavía no está activado para ningún supervisor.</div>
+    <button class="btn btn-primary" style="margin-bottom:18px;" onclick="verSupervisorDemo()">🔍 Probar vista de supervisor</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -811,6 +874,14 @@
     <div class="section-title" style="margin-top:16px;">Horas extra por empleado</div>
     <button class="btn-refresh" onclick="loadAdminHorasExtra()">🔄 Actualizar</button>
     <div id="admin-horas-extra"></div>
+  </div>
+
+  <!-- SUPERVISIONES: visitas del supervisor + checklist + faltantes de la semana -->
+  <div id="admin-step-supervisiones" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">Supervisiones</div>
+    <button class="btn-refresh" onclick="loadAdminSupervisiones()">🔄 Actualizar</button>
+    <div id="admin-supervisiones"></div>
   </div>
 
   <!-- SERVICIOS Y DOMICILIOS: planilla de referencia por empleado -->
@@ -1070,6 +1141,21 @@
   // empleado. La validación real está en el servidor (ADMINS_HASH); esta
   // lista solo sirve para restaurar la sesión guardada del lado del cliente.
   const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
+
+  // Supervisores (espejo de SUPERVISORES en AppsScript.gs). Rol doble previsto:
+  // empleado + supervisor; su pantalla muestra además la pestaña "🔍 Supervisión".
+  // ⚠️ VACÍO mientras es DEMO: nadie tiene el rol real todavía; el admin prueba la
+  // vista desde su panel ("🔍 Ver como supervisor (prueba)"). Al aprobar, agregar
+  // "Alejandro Jelvez" acá y en el backend. Servicios que NO supervisa: Acorus.
+  const SUPERVISORES = [];
+  const SERVICIOS_SIN_SUPERVISION = ["Acorus"];
+  const SUPERVISION_ITEMS = [
+    "Limpieza", "Baño", "Vidrios", "Exterior", "Escaleras", "Ascensor",
+    "Orden y presentación general", "Uso correcto de materiales",
+    "Presentación del empleado", "Cumplimiento del horario"
+  ];
+  const SUPERVISION_NIVELES = ["MAL", "PUEDE MEJORAR", "BIEN", "EXCELENTE", "N/A"];
+  function esSupervisorFront(u) { return SUPERVISORES.indexOf(u) !== -1; }
 
   // Servicios de un empleado: los suyos + los libres (Horas Extras, Suplencias,
   // Final de obra) al final.
@@ -1413,6 +1499,13 @@
     cargarCoberturas();
     cargarAusencias();
     cargarPermisosHoy();
+
+    // Restauro visibilidad normal de pestañas (por si quedó estado del demo admin).
+    ["registrar", "materiales", "historial", "vacaciones"].forEach(t =>
+      document.getElementById("tbtn-" + t).style.display = "");
+    // Rol doble: si además es supervisor, muestro la pestaña "🔍 Supervisión".
+    document.getElementById("tbtn-supervision").style.display =
+      esSupervisorFront(nombre) ? "" : "none";
   }
 
   // Al abrir la app, restaurar sesión si hay una guardada.
@@ -1815,13 +1908,236 @@
 
   // ---------- TABS ----------
   function switchTab(tab) {
-    ["registrar", "materiales", "historial", "vacaciones"].forEach(t => {
-      document.getElementById("tab-" + t).style.display = tab === t ? "block" : "none";
-      document.getElementById("tbtn-" + t).classList.toggle("active", tab === t);
+    ["registrar", "materiales", "historial", "vacaciones", "supervision"].forEach(t => {
+      const el = document.getElementById("tab-" + t);
+      const btn = document.getElementById("tbtn-" + t);
+      if (el) el.style.display = tab === t ? "block" : "none";
+      if (btn) btn.classList.toggle("active", tab === t);
     });
     if (tab === "historial")  { renderMisFaltas(); cargarMisHoras(); cargarHistorial(); }
     if (tab === "materiales") renderMaterialesTab();
     if (tab === "vacaciones") { llenarPermServicios(); onPermTipo(); cargarMisVacaciones(); cargarMisPermisos(); }
+    if (tab === "supervision") { supShowView("visitas"); }
+  }
+
+  // ======================= SUPERVISOR (front) =======================
+  let supVisitasCache = null;   // { records, items }
+  let supFormServicio = null;   // servicio que se está evaluando
+
+  // "dd/mm/yyyy" -> Date (00:00) o null.
+  function dmyToDate(s) {
+    const m = (s || "").toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return null;
+    const d = new Date(+m[3], +m[2] - 1, +m[1]); d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  // Lunes 00:00 de la semana de una fecha (semana lun–dom).
+  function lunesSemana(d) {
+    const x = new Date(d.getTime());
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); x.setHours(0, 0, 0, 0);
+    return x;
+  }
+  // Todos los servicios que supervisa (de SERVICIOS, dedup por nombre, menos los
+  // excluidos como Acorus). Devuelve [{nombre, dir, horario}].
+  function serviciosSupervisables() {
+    const vistos = {}, lista = [];
+    Object.keys(SERVICIOS).forEach(emp => {
+      (SERVICIOS[emp] || []).forEach(s => {
+        if (SERVICIOS_SIN_SUPERVISION.indexOf(s.nombre) !== -1 || vistos[s.nombre]) return;
+        vistos[s.nombre] = true;
+        lista.push({ nombre: s.nombre, dir: s.dir || "", horario: s.horario || null });
+      });
+    });
+    return lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }
+
+  function supShowView(view) {
+    ["visitas", "form", "materiales", "fichadas"].forEach(v => {
+      const el = document.getElementById("sup-view-" + v);
+      if (el) el.style.display = v === view ? "block" : "none";
+    });
+    if (view === "visitas")    cargarSupVisitas();
+    if (view === "materiales") cargarSupComprados();
+    if (view === "fichadas")   initSupFichadas();
+  }
+
+  async function cargarSupVisitas() {
+    const el = document.getElementById("sup-visitas-list");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "misSupervisiones", usuario: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      supVisitasCache = j;
+      renderSupVisitas();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function renderSupVisitas() {
+    const el = document.getElementById("sup-visitas-list");
+    const records = (supVisitasCache && supVisitasCache.records) || [];
+    const lun = lunesSemana(new Date());
+    const estaSemana = {};
+    records.forEach(r => {
+      const d = dmyToDate(r.fecha);
+      if (d && d >= lun) estaSemana[r.servicio] = r.fecha;
+    });
+    const servicios = serviciosSupervisables();
+    const pendientes = servicios.filter(s => !estaSemana[s.nombre]).length;
+    el.innerHTML = `
+      <div class="filtro-total"><b>${servicios.length - pendientes}</b> visitados · <b>${pendientes}</b> pendientes esta semana</div>
+      ${servicios.map(s => {
+        const hecho = estaSemana[s.nombre];
+        const n = s.nombre.replace(/'/g, "\\'");
+        return `
+        <div class="hist-row ${hecho ? "" : "salida"}">
+          <div>
+            <div class="hr-serv">${hecho ? "✅" : "🔴"} ${s.nombre}</div>
+            <div class="hr-hora">${s.dir || ""}${hecho ? " · visitado el " + hecho : ""}</div>
+          </div>
+          <button class="btn-mini btn-pedir" onclick="startSupVisita('${n}')">${hecho ? "Visitar otra vez" : "Registrar visita"}</button>
+        </div>`;
+      }).join("")}`;
+  }
+
+  function startSupVisita(nombre) {
+    const s = serviciosSupervisables().find(x => x.nombre === nombre);
+    if (!s) return;
+    supFormServicio = s;
+    document.getElementById("sup-form-serv").textContent = s.nombre;
+    document.getElementById("sup-form-dir").textContent = s.dir || "";
+    document.getElementById("sup-obs").value = "";
+    document.getElementById("sup-form-msg").textContent = "";
+    document.getElementById("sup-checklist").innerHTML = SUPERVISION_ITEMS.map((it, i) => `
+      <div style="margin:10px 0;">
+        <div style="font-weight:600;font-size:14px;margin-bottom:4px;">${it}</div>
+        <div class="sup-niveles" data-item="${i}" style="display:flex;gap:4px;flex-wrap:wrap;">
+          ${SUPERVISION_NIVELES.map(nv => `<button type="button" class="btn-mini sup-nivel" data-nivel="${nv}" onclick="supPickNivel(${i}, this)">${nv}</button>`).join("")}
+        </div>
+      </div>`).join("");
+    getLocation();
+    updateSupLoc();
+    // El GPS puede tardar: refresco el cartel cuando llega.
+    [800, 2000, 4000].forEach(ms => setTimeout(updateSupLoc, ms));
+    supShowView("form");
+  }
+
+  function supPickNivel(itemIdx, btn) {
+    const cont = document.querySelector('.sup-niveles[data-item="' + itemIdx + '"]');
+    if (!cont) return;
+    cont.querySelectorAll(".sup-nivel").forEach(b => b.classList.remove("sel"));
+    btn.classList.add("sel");
+  }
+
+  function updateSupLoc() {
+    const el = document.getElementById("sup-loc-status");
+    if (currentCoords) {
+      el.textContent = `📍 Ubicación OK (±${currentCoords.acc}m)`;
+      el.className = "loc-status ok";
+    } else {
+      el.textContent = "📍 Obteniendo ubicación... (necesaria para guardar)";
+      el.className = "loc-status";
+    }
+  }
+
+  async function guardarSupervision() {
+    const msg = document.getElementById("sup-form-msg");
+    msg.className = ""; msg.textContent = "";
+    if (!supFormServicio) return;
+    if (supPreview) { msg.className = "success"; msg.textContent = "🔍 Demo: en modo prueba la visita NO se guarda. Así se vería el guardado."; return; }
+    if (!currentCoords) { msg.className = "error"; msg.textContent = "Falta la ubicación (GPS). Activala e intentá de nuevo."; return; }
+    const items = {};
+    document.querySelectorAll("#sup-checklist .sup-niveles").forEach(cont => {
+      const sel = cont.querySelector(".sup-nivel.sel");
+      if (sel) items[SUPERVISION_ITEMS[+cont.getAttribute("data-item")]] = sel.getAttribute("data-nivel");
+    });
+    if (!Object.keys(items).length) { msg.className = "error"; msg.textContent = "Puntuá al menos un ítem."; return; }
+    const btn = document.getElementById("sup-guardar");
+    btn.disabled = true;
+    try {
+      const j = await fetchJson({
+        action: "registrarSupervision", usuario: currentUser, hash: currentHash,
+        servicio: supFormServicio.nombre, items: JSON.stringify(items),
+        observaciones: document.getElementById("sup-obs").value.trim(),
+        lat: currentCoords.lat, lon: currentCoords.lon, precision: currentCoords.acc
+      });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo guardar.");
+      msg.className = "success"; msg.textContent = "✅ Visita registrada.";
+      supVisitasCache = null;
+      setTimeout(() => supShowView("visitas"), 900);
+    } catch (e) {
+      msg.className = "error"; msg.textContent = "❌ " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function cargarSupComprados() {
+    const el = document.getElementById("sup-mat-list");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "supMaterialesComprados", usuario: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      const recs = j.records || [];
+      if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay materiales comprados para retirar.</div>`; return; }
+      el.innerHTML = recs.map(r => {
+        const uni = r.cantidad ? `${r.cantidad} ${r.cantidad == 1 ? "unidad" : "unidades"}` : "";
+        return `
+        <div class="hist-row">
+          <div>
+            <div class="hr-serv">${r.producto}${uni ? " · " + uni : ""}</div>
+            <div class="hr-hora">${r.servicio} · comprado el ${r.fecha}</div>
+          </div>
+          <button class="btn-mini btn-recibido" onclick="retirarMaterial('${r.servicio.replace(/'/g, "\\'")}','${r.producto.replace(/'/g, "\\'")}', this)">🚚 Retirado</button>
+        </div>`;
+      }).join("");
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  async function retirarMaterial(servicio, producto, btn) {
+    if (supPreview) { alert("🔍 Demo: en modo prueba no se retira nada."); return; }
+    btn.disabled = true;
+    try {
+      const j = await fetchJson({ action: "retirar", usuario: currentUser, hash: currentHash, servicio, producto });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo marcar.");
+      cargarSupComprados();
+    } catch (e) {
+      alert("❌ " + e.message);
+      btn.disabled = false;
+    }
+  }
+
+  function initSupFichadas() {
+    const sel = document.getElementById("sup-fich-emp");
+    if (sel.options.length) return;
+    const emps = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = `<option value="">Elegí un empleado...</option>` +
+      emps.map(e => `<option value="${e}">${e}</option>`).join("");
+  }
+
+  async function cargarSupFichadas() {
+    const emp = document.getElementById("sup-fich-emp").value;
+    const el = document.getElementById("sup-fich-list");
+    if (!emp) { el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "supHistorial", usuario: currentUser, hash: currentHash, empleado: emp });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      const recs = j.records || [];
+      if (!recs.length) { el.innerHTML = `<div class="hist-empty">Sin fichadas.</div>`; return; }
+      el.innerHTML = recs.slice(0, 100).map(r => `
+        <div class="hist-row ${r.tipo === "Salida" ? "salida" : ""}">
+          <div>
+            <div class="hr-serv">${r.fecha} · ${r.servicio}</div>
+            <div class="hr-hora">${r.tipo} ${r.hora}${r.estado ? " · " + r.estado : ""}</div>
+          </div>
+        </div>`).join("");
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
   }
 
   // Helper: fetch con JSON (comparte armado de URL para acciones nuevas).
@@ -2273,7 +2589,14 @@
           estadoHtml = `<div class="mat-fecha">⏳ Pedido${uni ? " (" + uni + ")" : ""} el ${p.fecha} — esperando compra</div>`;
           accionHtml = `<span class="mat-badge" style="background:#fef3c7;color:#b45309;">⏳ Pendiente</span>`;
         } else if (p.estado === "comprado") {
+          // DEMO: mientras no haya supervisor activo, el empleado sigue recibiendo
+          // desde "comprado" (flujo actual, sin romper nada). Al activar el supervisor
+          // para el resto, cambiar a: mostrar "lo retira el supervisor" sin botón, y
+          // que "Recibido" aparezca recién en el estado "retirado" (ver bloque de abajo).
           estadoHtml = `<div class="mat-fecha comprado">🛒 Comprado${uni ? " (" + uni + ")" : ""} — en camino</div>`;
+          accionHtml = `<button class="btn-mini btn-recibido" onclick="marcarRecibido(${i})">✅ Recibido</button>`;
+        } else if (p.estado === "retirado") {
+          estadoHtml = `<div class="mat-fecha comprado">🚚 Retirado${uni ? " (" + uni + ")" : ""} — el supervisor lo lleva</div>`;
           accionHtml = `<button class="btn-mini btn-recibido" onclick="marcarRecibido(${i})">✅ Recibido</button>`;
         } else {
           accionHtml = `
@@ -2287,7 +2610,7 @@
             </div>`;
         }
         return `
-        <div class="mat-item ${p.estado === 'pedido' ? 'pedido' : p.estado === 'comprado' ? 'comprado' : ''}">
+        <div class="mat-item ${p.estado === 'pedido' ? 'pedido' : (p.estado === 'comprado' || p.estado === 'retirado') ? 'comprado' : ''}">
           <div>
             <div class="mat-nombre">${p.nombre}</div>
             ${estadoHtml}
@@ -2474,6 +2797,38 @@
     return false;
   }
 
+  // ---------- DEMO SUPERVISOR (desde el panel admin) ----------
+  // El admin prueba la pantalla del supervisor con sus propias credenciales (los
+  // endpoints de supervisor aceptan admin). Las escrituras se bloquean (supPreview).
+  let supPreview = false;
+  const TABS_EMPLEADO = ["registrar", "materiales", "historial", "vacaciones"];
+
+  function verSupervisorDemo() {
+    supPreview = true;
+    document.getElementById("screen-admin").style.display = "none";
+    document.getElementById("screen-home").style.display = "block";
+    document.getElementById("sup-demo-banner").style.display = "flex";
+    document.getElementById("display-nombre").textContent = currentUser + " (demo supervisor)";
+    // Mostrar SOLO la pestaña de supervisión.
+    TABS_EMPLEADO.forEach(t => document.getElementById("tbtn-" + t).style.display = "none");
+    document.getElementById("tbtn-supervision").style.display = "";
+    startClock();
+    getLocation();
+    switchTab("supervision");
+  }
+
+  function salirSupervisorDemo() {
+    supPreview = false;
+    clearInterval(clockInterval);
+    document.getElementById("sup-demo-banner").style.display = "none";
+    // Restaurar visibilidad normal de las pestañas de empleado.
+    TABS_EMPLEADO.forEach(t => document.getElementById("tbtn-" + t).style.display = "");
+    document.getElementById("tbtn-supervision").style.display = "none";
+    document.getElementById("screen-home").style.display = "none";
+    document.getElementById("screen-admin").style.display = "block";
+    adminShowStep("empleados");
+  }
+
   function adminShowStep(step) {
     document.getElementById("admin-step-empleados").style.display = step === "empleados" ? "block" : "none";
     document.getElementById("admin-step-servicios").style.display = step === "servicios" ? "block" : "none";
@@ -2494,6 +2849,7 @@
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
     document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
     document.getElementById("admin-step-comprasserv").style.display = step === "comprasserv" ? "block" : "none";
+    document.getElementById("admin-step-supervisiones").style.display = step === "supervisiones" ? "block" : "none";
   }
 
   // ---------- RESUMEN DIARIO (todos los empleados juntos) ----------
@@ -4001,6 +4357,70 @@
   // (día, servicio, entrada→salida, duración) + excedente semanal por mes.
   // Los que no tienen nada aparecen igual con "Sin novedades". Se puede filtrar
   // por empleado/período y descargar como CSV (lo que esté filtrado).
+  // ---------- SUPERVISIONES (admin) ----------
+  let adminSupervisionesCache = null;
+
+  function openAdminSupervisiones() {
+    adminShowStep("supervisiones");
+    loadAdminSupervisiones();
+  }
+
+  async function loadAdminSupervisiones() {
+    const el = document.getElementById("admin-supervisiones");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando supervisiones...</div>`;
+    try {
+      const j = await fetchJson({ action: "adminSupervisiones", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      adminSupervisionesCache = j;
+      renderAdminSupervisiones();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function nivelColor(n) {
+    return n === "MAL" ? "#dc2626" : n === "PUEDE MEJORAR" ? "#d97706"
+         : n === "BIEN" ? "#2563eb" : n === "EXCELENTE" ? "#16a34a" : "#64748b";
+  }
+
+  function renderAdminSupervisiones() {
+    const el = document.getElementById("admin-supervisiones");
+    const records = (adminSupervisionesCache && adminSupervisionesCache.records) || [];
+    const lun = lunesSemana(new Date());
+    const estaSemana = {};
+    records.forEach(r => { const d = dmyToDate(r.fecha); if (d && d >= lun) estaSemana[r.servicio] = true; });
+    const servicios = serviciosSupervisables();
+    const faltantes = servicios.filter(s => !estaSemana[s.nombre]);
+
+    const faltHtml = `
+      <div class="filtro-total">Esta semana: <b>${servicios.length - faltantes.length}</b> visitados · <b>${faltantes.length}</b> pendientes</div>
+      ${faltantes.length
+        ? `<div class="hist-row salida"><div><div class="hr-serv">🔴 Faltan visitar esta semana</div><div class="hr-hora">${faltantes.map(s => s.nombre).join(", ")}</div></div></div>`
+        : `<div class="hist-row"><div><div class="hr-serv">✅ Todos visitados esta semana</div></div></div>`}`;
+
+    if (!records.length) {
+      el.innerHTML = faltHtml + `<div class="hist-empty">Todavía no hay visitas registradas.</div>`;
+      return;
+    }
+
+    const visitasHtml = records.map(r => {
+      const items = r.items || {};
+      const chips = Object.keys(items).map(k => {
+        const c = nivelColor(items[k]);
+        return `<span class="badge" style="background:#fff;border:1px solid ${c};color:${c};margin:2px 2px 0 0;display:inline-block;">${k}: ${items[k]}</span>`;
+      }).join("");
+      return `
+        <div class="hist-day">
+          <div class="hist-day-label">${r.servicio} · ${r.fecha} ${r.hora}</div>
+          <div style="padding:6px 0;">${chips || "<span class='hr-hora'>sin ítems</span>"}</div>
+          ${r.observaciones ? `<div class="hr-hora">📝 ${r.observaciones}</div>` : ""}
+          <div class="hr-hora">👤 ${r.supervisor}${r.linkGPS && r.linkGPS !== "No disponible" ? ` · <a href="${r.linkGPS}" target="_blank">📍 ubicación</a>` : ""}</div>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = faltHtml + `<div class="section-title" style="margin-top:14px;">Visitas registradas</div>` + visitasHtml;
+  }
+
   let adminNovedadesCache = null;
 
   function openAdminNovedades() {

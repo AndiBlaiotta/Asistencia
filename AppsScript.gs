@@ -40,7 +40,7 @@ const HEADERS = [
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
                            "Vacaciones", "Coberturas", "Ausencias", "Permisos",
-                           "Tiempo Extra"];
+                           "Tiempo Extra", "Supervisiones"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -172,6 +172,31 @@ const EMPLEADOS = [
   "Sabrina Scarampo", "Rebeca Ayala", "Alejandro Jelvez", "Milagros Acuña"
 ];
 const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
+
+// Supervisores: visitan los servicios (menos Acorus), puntúan con una checklist
+// y retiran los materiales comprados. Rol DOBLE previsto para Alejandro (sigue en
+// EMPLEADOS y además supervisor). Ver front (SUPERVISORES duplicado) y hoja
+// "Supervisiones". Cambiar = tocar ambos.
+// ⚠️ VACÍO a propósito mientras es DEMO: el admin prueba la vista de supervisor
+// desde su panel (con sus credenciales), sin activarle el rol a nadie. Al aprobar,
+// agregar "Alejandro Jelvez" acá y en el front para activarlo de verdad.
+const SUPERVISORES = [];
+
+// Servicios que el supervisor NO visita (los deja fuera de su lista y del control
+// de visitas semanales).
+const SERVICIOS_SIN_SUPERVISION = ["Acorus"];
+
+// Ítems de la checklist de supervisión (mismos para todos los servicios) y los
+// niveles válidos. "N/A" = el ítem no aplica a ese lugar (ej. ascensor en una casa).
+const SUPERVISION_ITEMS = [
+  "Limpieza", "Baño", "Vidrios", "Exterior", "Escaleras", "Ascensor",
+  "Orden y presentación general", "Uso correcto de materiales",
+  "Presentación del empleado", "Cumplimiento del horario"
+];
+const SUPERVISION_NIVELES = ["MAL", "PUEDE MEJORAR", "BIEN", "EXCELENTE", "N/A"];
+const SUPERVISION_HEADERS = ["Fecha", "Hora", "Supervisor", "Servicio"]
+  .concat(SUPERVISION_ITEMS)
+  .concat(["Observaciones", "Latitud", "Longitud", "Link GPS", "Precisión (m)"]);
 
 // Servicios "libres": sin horario fijo, con dirección variable escrita al
 // fichar, EXENTOS de la regla de una fichada por día (Regla D) y disponibles
@@ -345,6 +370,7 @@ function verificarUsuario(usuario, clientHash) {
 
 function esEmpleado(u)     { return EMPLEADOS.indexOf(u) !== -1; }
 function esAdminNombre(u)  { return ADMINS.indexOf(u) !== -1; }
+function esSupervisor(u)   { return SUPERVISORES.indexOf(u) !== -1; }
 
 // Usadas por los endpoints (post-login). Solo validan que la credencial
 // matchee; la caducidad se aplica en el login, no en cada request.
@@ -353,6 +379,9 @@ function checkAuth(empleado, hash) {
 }
 function checkAdmin(admin, hash) {
   return esAdminNombre(admin) && verificarUsuario(admin, hash).ok;
+}
+function checkSupervisor(usuario, hash) {
+  return esSupervisor(usuario) && verificarUsuario(usuario, hash).ok;
 }
 
 // Guarda/actualiza la credencial de un usuario y resetea la fecha de cambio.
@@ -604,23 +633,106 @@ function logPedido(empleado, servicio, producto, accion, cantidad) {
   sheet.getRange(lastRow, 7).setNumberFormat("@").setValue(cantidad != null ? String(cantidad) : "");
 }
 
+// ---- Supervisiones (visitas semanales del supervisor + checklist) ----
+function getSupervisionesSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Supervisiones");
+  if (!sheet) {
+    sheet = ss.insertSheet("Supervisiones");
+    sheet.appendRow(SUPERVISION_HEADERS);
+    sheet.getRange(1, 1, 1, SUPERVISION_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+// Lee las supervisiones (más recientes primero). `desdeInt` = yyyymmdd mínimo
+// (0 = todas). Devuelve fecha, hora, supervisor, servicio, items{}, observaciones,
+// GPS. Un item vacío queda fuera del objeto.
+function leerSupervisiones(desdeInt) {
+  const sheet = getSupervisionesSheet();
+  if (sheet.getLastRow() <= 1) return [];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, SUPERVISION_HEADERS.length).getValues();
+  const nItems = SUPERVISION_ITEMS.length;
+  const recs = [];
+  data.forEach(row => {
+    const fecha = fmtCell(row[0]);
+    const fi = fechaAInt(fecha);
+    if (desdeInt && (isNaN(fi) || fi < desdeInt)) return;
+    const items = {};
+    for (let i = 0; i < nItems; i++) {
+      const v = (row[4 + i] || "").toString().trim();
+      if (v) items[SUPERVISION_ITEMS[i]] = v;
+    }
+    const lat = row[4 + nItems + 1], lon = row[4 + nItems + 2];
+    const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+    recs.push({
+      fecha: fecha,
+      hora: fmtCell(row[1]),
+      supervisor: (row[2] || "").toString(),
+      servicio: (row[3] || "").toString(),
+      items: items,
+      observaciones: (row[4 + nItems] || "").toString(),
+      lat: lat, lon: lon,
+      linkGPS: tieneGPS ? "https://www.google.com/maps?q=" + lat + "," + lon : "No disponible",
+      fi: isNaN(fi) ? 0 : fi
+    });
+  });
+  return recs.sort((a, b) => b.fi - a.fi);
+}
+
+// Historial de fichadas de un empleado (más recientes primero). Lo usan el admin
+// (adminHistorial) y el supervisor (supHistorial). `fila` = nº de fila real en la
+// hoja (para poder anular).
+function historialDeEmpleado(empleado) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(empleado);
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const data = sheet.getDataRange().getValues();
+  const extraMap = tiempoExtraMap(empleado);
+  return data.slice(1).map((row, i) => {
+    const lat = row[5], lon = row[6];
+    const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
+    const extra = (row[3] === "Salida") ? extraMap[fmtCell(row[0]) + "|" + row[1]] : null;
+    return {
+      fila:      i + 2,
+      fecha:     fmtCell(row[0]),
+      servicio:  row[1],
+      direccion: row[2],
+      tipo:      row[3],
+      hora:      fmtCell(row[4]),
+      lat:       lat,
+      lon:       lon,
+      linkGPS:   tieneGPS ? "https://www.google.com/maps?q=" + lat + "," + lon : "No disponible",
+      estado:    row[9] || "",
+      motivo:    (row[10] || "").toString(),
+      extra:     extra || null
+    };
+  }).reverse();
+}
+
 // Parsea el texto de una celda de la grilla de materiales.
-// Formatos: "" (disponible) · "PEDIDO <cant> <fecha>" · "COMPRADO <cant> <fecha>".
-// Tolera el formato viejo sin cantidad ("PEDIDO <fecha>") -> cantidad 1.
+// Formatos: "" (disponible) · "PEDIDO <cant> <fecha>" · "COMPRADO <cant> <fecha>"
+// · "RETIRADO <cant> <fecha>". Tolera el formato viejo sin cantidad -> cantidad 1.
+function estadoDeKeyword(k) {
+  return k === "PEDIDO" ? "pedido" : k === "COMPRADO" ? "comprado" : "retirado";
+}
 function parseEstadoCelda(texto) {
   texto = (texto || "").toString().trim();
   if (texto === "") return { estado: "disponible", cantidad: "", fecha: "" };
-  let m = texto.match(/^(PEDIDO|COMPRADO)\s+(\d+)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/);
+  let m = texto.match(/^(PEDIDO|COMPRADO|RETIRADO)\s+(\d+)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/);
   if (m) {
-    return { estado: m[1] === "PEDIDO" ? "pedido" : "comprado", cantidad: m[2], fecha: m[3] };
+    return { estado: estadoDeKeyword(m[1]), cantidad: m[2], fecha: m[3] };
   }
-  m = texto.match(/^(PEDIDO|COMPRADO)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/); // formato viejo sin cantidad
+  m = texto.match(/^(PEDIDO|COMPRADO|RETIRADO)\s+(\d{1,2}\/\d{1,2}\/\d{4})$/); // viejo sin cantidad
   if (m) {
-    return { estado: m[1] === "PEDIDO" ? "pedido" : "comprado", cantidad: "1", fecha: m[2] };
+    return { estado: estadoDeKeyword(m[1]), cantidad: "1", fecha: m[2] };
   }
-  // Cualquier otra cosa que empiece con PEDIDO/COMPRADO: tratar como activo.
+  // Cualquier otra cosa que empiece con PEDIDO/COMPRADO/RETIRADO: tratar como activo.
   if (texto.indexOf("PEDIDO") === 0)   return { estado: "pedido",   cantidad: "1", fecha: "" };
   if (texto.indexOf("COMPRADO") === 0) return { estado: "comprado", cantidad: "1", fecha: "" };
+  if (texto.indexOf("RETIRADO") === 0) return { estado: "retirado", cantidad: "1", fecha: "" };
   return { estado: "disponible", cantidad: "", fecha: "" };
 }
 
@@ -1463,11 +1575,16 @@ function doGet(e) {
   // Devuelve el rol para que el cliente sepa qué pantalla mostrar.
   if (p.action === "login") {
     const usuario = p.empleado;
-    const role = esAdminNombre(usuario) ? "admin" : (esEmpleado(usuario) ? "empleado" : null);
+    // Rol base para el ruteo del front: admin > empleado > supervisor "puro".
+    // Alejandro es empleado Y supervisor: entra como "empleado" con supervisor:true.
+    const role = esAdminNombre(usuario) ? "admin"
+               : esEmpleado(usuario)    ? "empleado"
+               : esSupervisor(usuario)  ? "supervisor" : null;
     if (role) {
       const res = verificarUsuario(usuario, p.hash);
       if (res.ok) {
-        return jsonOut({ status: "ok", role, mustChangePassword: !!res.mustChange });
+        return jsonOut({ status: "ok", role, supervisor: esSupervisor(usuario),
+                         mustChangePassword: !!res.mustChange });
       }
     }
     return jsonOut({ status: "error", message: "Usuario o contraseña incorrectos" });
@@ -1478,7 +1595,7 @@ function doGet(e) {
   // actual, se guarda el nuevo (HMAC) y se resetea la fecha de caducidad.
   if (p.action === "cambiarPassword" && p.empleado && p.hash && p.nuevoHash) {
     const usuario = p.empleado;
-    if (!esEmpleado(usuario) && !esAdminNombre(usuario)) {
+    if (!esEmpleado(usuario) && !esAdminNombre(usuario) && !esSupervisor(usuario)) {
       return jsonOut({ status: "error", message: "Usuario inválido" });
     }
     if (!verificarUsuario(usuario, p.hash).ok) {
@@ -1508,35 +1625,7 @@ function doGet(e) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const ss    = SpreadsheetApp.getActiveSpreadsheet();
-      const sheet = ss.getSheetByName(p.empleado);
-      if (!sheet || sheet.getLastRow() <= 1) {
-        return jsonOut({ status: "ok", records: [] });
-      }
-      const data = sheet.getDataRange().getValues();
-      const extraMap = tiempoExtraMap(p.empleado);
-      // `fila` = nº de fila real en la hoja (para poder anular). El elemento i
-      // de data.slice(1) es la fila i+2. Se mapea antes de invertir el orden.
-      const records = data.slice(1).map((row, i) => {
-        const lat = row[5], lon = row[6];
-        const tieneGPS = lat && lon && lat !== "No disponible" && lon !== "No disponible";
-        const extra = (row[3] === "Salida") ? extraMap[fmtCell(row[0]) + "|" + row[1]] : null;
-        return {
-          fila:      i + 2,
-          fecha:     fmtCell(row[0]),
-          servicio:  row[1],
-          direccion: row[2],
-          tipo:      row[3],
-          hora:      fmtCell(row[4]),
-          lat:       lat,
-          lon:       lon,
-          linkGPS:   tieneGPS ? `https://www.google.com/maps?q=${lat},${lon}` : "No disponible",
-          estado:    row[9] || "",
-          motivo:    (row[10] || "").toString(),
-          extra:     extra || null
-        };
-      }).reverse();
-      return jsonOut({ status: "ok", records });
+      return jsonOut({ status: "ok", records: historialDeEmpleado(p.empleado) });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -1965,8 +2054,38 @@ function doGet(e) {
     }
   }
 
+  // ---- RETIRAR: el supervisor (o un admin de respaldo) pasa un producto de
+  // COMPRADO a RETIRADO (lo levantó para llevarlo al servicio) ----
+  if (p.action === "retirar" && p.servicio && p.producto) {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (PRODUCTOS.indexOf(p.producto) === -1) {
+      return jsonOut({ status: "error", message: "Producto inválido" });
+    }
+    try {
+      const sheet = getMaterialesSheet();
+      const row   = getProductoRow(sheet, p.producto);
+      const col   = getServicioCol(sheet, p.servicio);
+      const cell  = sheet.getRange(row, col);
+      const est   = parseEstadoCelda(cell.getValue());
+
+      if (est.estado !== "comprado") {
+        return jsonOut({ status: "error", message: "Ese producto no está comprado (listo para retirar)" });
+      }
+
+      // Mantiene cantidad y fecha original; solo cambia el estado.
+      cell.setNumberFormat("@").setValue("RETIRADO " + est.cantidad + " " + est.fecha);
+      logPedido(p.usuario, p.servicio, p.producto, "Retirado", est.cantidad);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- RECIBIDO: el empleado confirma la recepción y libera el producto ----
-  // Sale desde PEDIDO o COMPRADO (por si el admin no llegó a marcar comprado).
+  // Sale desde cualquier estado activo (RETIRADO es el normal; también tolera
+  // PEDIDO/COMPRADO por si quedó algo a mitad de camino).
   if (p.action === "recibido" && p.servicio && p.producto) {
     if (!checkAuth(p.empleado, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
@@ -1988,6 +2107,129 @@ function doGet(e) {
       cell.setValue("");
       logPedido(p.empleado, p.servicio, p.producto, "Recibido", est.cantidad);
       return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ======================= SUPERVISOR =======================
+
+  // ---- Registrar una visita de supervisión (checklist + GPS obligatorio) ----
+  if (p.action === "registrarSupervision" && p.servicio) {
+    if (!checkSupervisor(p.usuario, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (SERVICIOS_SIN_SUPERVISION.indexOf(p.servicio) !== -1) {
+      return jsonOut({ status: "error", message: "Ese servicio no se supervisa" });
+    }
+    const lat = (p.lat || "").toString(), lon = (p.lon || "").toString();
+    if (!lat || !lon || lat === "No disponible" || lon === "No disponible") {
+      return jsonOut({ status: "error", message: "Falta la ubicación (GPS) de la visita" });
+    }
+    let itemsObj = {};
+    try { itemsObj = JSON.parse(p.items || "{}"); } catch (e) { itemsObj = {}; }
+    const nItems = SUPERVISION_ITEMS.length;
+    const fila = [];
+    for (let i = 0; i < SUPERVISION_HEADERS.length; i++) fila.push("");
+    let algunItem = false;
+    SUPERVISION_ITEMS.forEach(function (it, i) {
+      const nivel = (itemsObj[it] || "").toString().trim();
+      if (SUPERVISION_NIVELES.indexOf(nivel) !== -1) { fila[4 + i] = nivel; algunItem = true; }
+    });
+    if (!algunItem) {
+      return jsonOut({ status: "error", message: "Puntuá al menos un ítem de la checklist" });
+    }
+    try {
+      const sheet = getSupervisionesSheet();
+      const tz = Session.getScriptTimeZone();
+      const now = new Date();
+      fila[0] = Utilities.formatDate(now, tz, "dd/MM/yyyy");
+      fila[1] = Utilities.formatDate(now, tz, "HH:mm:ss");
+      fila[2] = p.usuario;
+      fila[3] = p.servicio;
+      fila[4 + nItems]     = (p.observaciones || "").toString();
+      fila[4 + nItems + 1] = lat;
+      fila[4 + nItems + 2] = lon;
+      fila[4 + nItems + 3] = "https://www.google.com/maps?q=" + lat + "," + lon;
+      fila[4 + nItems + 4] = (p.precision || "").toString();
+      const r = sheet.getLastRow() + 1;
+      sheet.getRange(r, 1, 1, 2).setNumberFormat("@"); // fecha/hora como texto
+      sheet.getRange(r, 1, 1, fila.length).setValues([fila]);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Supervisor: sus propias visitas (últimos ~90 días) para el semáforo ----
+  // Acepta admin para la vista DEMO del panel de administración.
+  if (p.action === "misSupervisiones") {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const desde = new Date(hoy.getTime() - 90 * 86400000);
+      const desdeInt = desde.getFullYear() * 10000 + (desde.getMonth() + 1) * 100 + desde.getDate();
+      const records = leerSupervisiones(desdeInt).filter(function (r) { return r.supervisor === p.usuario; });
+      return jsonOut({ status: "ok", records: records, items: SUPERVISION_ITEMS });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Admin: todas las supervisiones (reporte + visitas faltantes) ----
+  if (p.action === "adminSupervisiones") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      return jsonOut({ status: "ok", records: leerSupervisiones(0), items: SUPERVISION_ITEMS });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Supervisor/Admin: materiales en estado COMPRADO, listos para retirar ----
+  if (p.action === "supMaterialesComprados") {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet   = getMaterialesSheet();
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+      const records = [];
+      if (lastRow > 1 && lastCol > 1) {
+        const grid = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+        const encabezado = grid[0];
+        for (let c = 1; c < lastCol; c++) {
+          const servicio = (encabezado[c] || "").toString();
+          if (servicio === "" || servicio === "Total" || servicio === "Producto") continue;
+          for (let r = 1; r < lastRow; r++) {
+            const producto = (grid[r][0] || "").toString();
+            if (producto === "") continue;
+            const est = parseEstadoCelda(grid[r][c]);
+            if (est.estado === "comprado") {
+              records.push({ servicio: servicio, producto: producto, cantidad: est.cantidad, fecha: est.fecha });
+            }
+          }
+        }
+      }
+      return jsonOut({ status: "ok", records: records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Supervisor: ver las fichadas (entrada/salida) de un empleado ----
+  // Acepta admin para la vista DEMO del panel de administración.
+  if (p.action === "supHistorial" && p.empleado) {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      return jsonOut({ status: "ok", records: historialDeEmpleado(p.empleado) });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
