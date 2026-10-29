@@ -1318,19 +1318,63 @@ function horasExtraDe(empleado) {
   }));
 }
 
+// Etiqueta corta para la planilla según el servicio libre fichado (lo que se
+// muestra en el badge de la novedad cuando no es feriado/domingo).
+function etiquetaLibre(servicio) {
+  if (servicio === "Horas Extras") return "Horas extra";
+  if (servicio === "Final de obra") return "Final de obra";
+  if (servicio === "Servicios extra dentro del horario") return "Servicio extra";
+  if (servicio.indexOf("Suplencia") === 0) return "Suplencia";
+  return servicio;
+}
+
+// Empareja entradas con salidas (listas de minutos desde medianoche). Greedy:
+// cada entrada toma la primera salida posterior. Si queda una entrada sin
+// salida (o una salida sin entrada), igual devuelve el evento con `falta` =
+// "salida"/"entrada" y minutos 0, para NO perder un feriado/extra que quedó
+// sin cerrar (antes esas fichadas sueltas desaparecían de la planilla).
+function emparejarFichadas(ent, sal) {
+  const e = (ent || []).slice().sort((a, b) => a - b);
+  const s = (sal || []).slice().sort((a, b) => a - b);
+  const out = [];
+  let i = 0, j = 0;
+  while (i < e.length) {
+    while (j < s.length && s[j] < e[i]) {           // salida sin entrada previa
+      out.push({ desde: null, hasta: s[j], minutos: 0, falta: "entrada" });
+      j++;
+    }
+    if (j < s.length) {                             // par completo
+      out.push({ desde: e[i], hasta: s[j], minutos: s[j] - e[i], falta: "" });
+      i++; j++;
+    } else {                                        // entrada sin salida
+      out.push({ desde: e[i], hasta: null, minutos: 0, falta: "salida" });
+      i++;
+    }
+  }
+  while (j < s.length) {                            // salidas sobrantes
+    out.push({ desde: null, hasta: s[j], minutos: 0, falta: "entrada" });
+    j++;
+  }
+  return out;
+}
+
 // ---- Novedades por empleado (para la planilla mensual) ----
-// Detalle DÍA POR DÍA de lo que hay que destacar, con entrada→salida real:
+// Detalle DÍA POR DÍA de TODO lo que no es rutinario para el empleado, con
+// entrada→salida real. Genera una fila por evento (servicio+fecha) cuando:
 //  - "Feriado": trabajó un feriado nacional (cualquier servicio).
 //  - "Domingo": trabajó un domingo (cualquier servicio).
-// Feriado/domingo NO son "extra" aparte (sus horas ya entran en el total
-// semanal); la fila existe solo para poder CONTAR cuántos días de feriado/
-// domingo se trabajaron. Las fichadas en servicios libres de día normal NO
-// generan fila propia: no son extra por sí solas, solo suman al total semanal.
-// Cada fila trae fecha, servicio, desde/hasta (minutos desde medianoche) y
-// duración en minutos. Aparte, `excedente` = por mes, las horas trabajadas por
-// ENCIMA del contrato semanal (lo único que es horas extra); no tiene hora
-// desde/hasta (es un neto semanal). Lee toda la hoja (todos los meses). Los
-// empleados sin nada devuelven listas vacías (= "sin novedades").
+//  - servicio LIBRE (Horas extra, Final de obra, Suplencia, Servicio extra),
+//    en cualquier día: la fila sale con ese badge (si además es feriado/
+//    domingo, manda el feriado/domingo en el badge y el servicio ya dice cuál).
+// La fila sale AUNQUE falte una de las dos fichadas (entrada sin salida, o al
+// revés): trae `falta`="salida"/"entrada" y minutos 0, así nunca se pierde un
+// feriado/extra que quedó sin cerrar (bug viejo: se exigía el par completo).
+// Estas filas son INFORMATIVAS: no cambian el cálculo del excedente (los libres
+// ya suman al total semanal; feriado/domingo no son extra aparte). Aparte,
+// `excedente` = por mes, las horas trabajadas por ENCIMA del contrato semanal
+// (lo único que es horas extra); no tiene hora desde/hasta (es un neto semanal).
+// Lee toda la hoja (todos los meses). Los empleados sin nada devuelven listas
+// vacías (= "sin novedades").
 function novedadesDe(empleado) {
   const servHor = HORARIOS[empleado] || {};
   const contrato = horasContratoSemanal(empleado);
@@ -1342,8 +1386,8 @@ function novedadesDe(empleado) {
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
   const weekWorked = {};   // wkInt -> minutos (todos los días: regular programado + libre real)
   const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
-  const especiales = {};   // "tipo|servicio|fi" -> { fecha, fi, servicio, tipo, mes, ent:[], sal:[] }
-  const libres     = {};   // "servicio|fi" -> { wk, ent:[], sal:[] }  (suma al total; sin fila de día)
+  const eventos    = {};   // "servicio|fi" -> { fecha, fi, servicio, tipo, mes, ent:[], sal:[] }
+  const libres     = {};   // "servicio|fi" -> { wk, ent:[], sal:[] }  (para el total semanal)
 
   data.forEach(row => {
     const fechaStr = fmtCell(row[0]);
@@ -1359,6 +1403,7 @@ function novedadesDe(empleado) {
     const mesF  = Utilities.formatDate(dObj, tz, "yyyy-MM");
     weekMonth[wk] = Utilities.formatDate(lunes, tz, "yyyy-MM");
     const hm = horaAMin(fmtCell(row[4]));
+    const esLibre = SERVICIOS_LIBRES.indexOf(servicio) !== -1;
 
     // Total semanal (base del excedente): regular por duración programada, libres
     // por duración real. Cuenta todos los días (incluido domingo/feriado).
@@ -1367,47 +1412,45 @@ function novedadesDe(empleado) {
         const dur = horaAMin(servHor[servicio][dow][1]) - horaAMin(servHor[servicio][dow][0]);
         if (!isNaN(dur) && dur > 0) weekWorked[wk] = (weekWorked[wk] || 0) + dur;
       }
-    } else if (SERVICIOS_LIBRES.indexOf(servicio) !== -1) {
+    } else if (esLibre) {
       const key = servicio + "|" + fi;
       const e = libres[key] || (libres[key] = { wk, ent: [], sal: [] });
       if (!isNaN(hm)) (tipo === "Entrada" ? e.ent : e.sal).push(hm);
     }
 
-    // Domingo o feriado trabajado: fila de día destacada (para contar los días).
+    // NOVEDAD (todo lo no rutinario): feriado, domingo o servicio libre, en
+    // cualquier día. Una fila por evento (servicio+fecha).
     const feriado = esFeriado(fi);
-    if (feriado || dow === 0) {
-      const t = feriado ? "Feriado" : "Domingo";
-      const key = t + "|" + servicio + "|" + fi;
-      const s = especiales[key] || (especiales[key] =
-        { fecha: fechaStr, fi, servicio, tipo: t, mes: mesF, ent: [], sal: [] });
+    if (feriado || dow === 0 || esLibre) {
+      const etiqueta = feriado ? "Feriado" : (dow === 0 ? "Domingo" : etiquetaLibre(servicio));
+      const key = servicio + "|" + fi;
+      const s = eventos[key] || (eventos[key] =
+        { fecha: fechaStr, fi, servicio, tipo: etiqueta, mes: mesF, ent: [], sal: [] });
       if (!isNaN(hm)) (tipo === "Entrada" ? s.ent : s.sal).push(hm);
     }
   });
 
-  // Libres -> suma al total semanal (sin fila de día: no son extra por sí solos).
+  // Libres -> suma al total semanal (base del excedente; no afecta las filas).
   Object.keys(libres).forEach(k => {
     const e = libres[k];
-    e.ent.sort((a, b) => a - b); e.sal.sort((a, b) => a - b);
-    const n = Math.min(e.ent.length, e.sal.length);
-    for (let i = 0; i < n; i++) {
-      const dur = e.sal[i] - e.ent[i];
-      if (dur > 0) weekWorked[e.wk] = (weekWorked[e.wk] || 0) + dur;
-    }
+    emparejarFichadas(e.ent, e.sal).forEach(ev => {
+      if (ev.minutos > 0) weekWorked[e.wk] = (weekWorked[e.wk] || 0) + ev.minutos;
+    });
   });
 
+  // Filas de novedad: una por par entrada→salida; si falta una fichada, igual
+  // sale (con lo que haya) para no perder un feriado/extra sin cerrar.
   const dias = [];
-  // Feriado/domingo -> filas de día destacadas.
-  Object.keys(especiales).forEach(k => {
-    const s = especiales[k];
-    s.ent.sort((a, b) => a - b); s.sal.sort((a, b) => a - b);
-    const n = Math.min(s.ent.length, s.sal.length);
-    for (let i = 0; i < n; i++) {
-      const dur = s.sal[i] - s.ent[i];
-      if (dur > 0) dias.push({ mes: s.mes, fecha: s.fecha, fi: s.fi, servicio: s.servicio,
-                               tipo: s.tipo, desde: s.ent[i], hasta: s.sal[i], minutos: dur });
-    }
+  Object.keys(eventos).forEach(k => {
+    const s = eventos[k];
+    emparejarFichadas(s.ent, s.sal).forEach(ev => {
+      dias.push({ mes: s.mes, fecha: s.fecha, fi: s.fi, servicio: s.servicio,
+                  tipo: s.tipo, desde: ev.desde, hasta: ev.hasta,
+                  minutos: ev.minutos, falta: ev.falta });
+    });
   });
-  dias.sort((a, b) => a.fi - b.fi || a.desde - b.desde);
+  const ord = x => (x == null ? 1e9 : x);
+  dias.sort((a, b) => a.fi - b.fi || ord(a.desde) - ord(b.desde));
 
   // Excedente semanal por mes (lo único que es horas extra).
   const exMes = {};
