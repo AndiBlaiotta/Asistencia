@@ -4494,12 +4494,17 @@
       }
       const filasDias = nf.dias.map(d => {
         const badge = d.tipo === "Feriado" ? "badge-tarde"
-                    : d.tipo === "Domingo" ? "badge-comprado" : "badge-salida";
+                    : d.tipo === "Domingo" ? "badge-comprado" : "badge-extra";
+        const horaTxt = d.falta === "salida"
+              ? `🕐 ${minAHHMM(d.desde)} → <b style="color:#dc2626;">sin salida</b>`
+              : d.falta === "entrada"
+              ? `🕐 <b style="color:#dc2626;">sin entrada</b> → ${minAHHMM(d.hasta)}`
+              : `🕐 ${minAHHMM(d.desde)}–${minAHHMM(d.hasta)} · ${fmtMinutos(d.minutos)}`;
         return `
         <div class="hist-row salida">
           <div>
             <div class="hr-serv">${diaSemanaNombre(d.fecha)} ${d.fecha} · ${d.servicio}</div>
-            <div class="hr-hora">🕐 ${minAHHMM(d.desde)}–${minAHHMM(d.hasta)} · ${fmtMinutos(d.minutos)}</div>
+            <div class="hr-hora">${horaTxt}</div>
           </div>
           <span class="badge ${badge}">${d.tipo}</span>
         </div>`;
@@ -4580,7 +4585,11 @@
       }
       nf.dias.forEach(d => rows.push([
         r.empleado, mesLabel(mesKey(d.fecha)), d.fecha, diaSemanaNombre(d.fecha),
-        d.tipo, d.servicio, minAHHMM(d.desde), minAHHMM(d.hasta), fmtMinutos(d.minutos), dec(d.minutos)
+        d.tipo, d.servicio,
+        d.desde == null ? "" : minAHHMM(d.desde),
+        d.hasta == null ? "" : minAHHMM(d.hasta),
+        d.falta === "salida" ? "sin salida" : d.falta === "entrada" ? "sin entrada" : fmtMinutos(d.minutos),
+        d.minutos ? dec(d.minutos) : ""
       ]));
       nf.tiempoExtra.forEach(t => rows.push([
         r.empleado, mesLabel(mesKey(t.fecha)), t.fecha, diaSemanaNombre(t.fecha),
