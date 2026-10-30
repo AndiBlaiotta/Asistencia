@@ -2155,57 +2155,60 @@ function doGet(e) {
     }
   }
 
-  // ---- ADMIN: fijar el estado de un producto para un servicio (libertad total) ----
-  // El admin puede poner cualquier producto en cualquier estado: "disponible"
-  // (libera la celda), "pedido", "comprado" o "retirado", con la cantidad que
-  // indique. Sirve para corregir un estado, cargar un pedido a mano o cancelar
-  // uno equivocado. Mantiene la fecha original del pedido si ya existía.
-  if (p.action === "adminSetMaterial" && p.servicio && p.producto) {
+  // ---- ADMIN: fijar el estado de VARIOS productos de un servicio de una (libertad total) ----
+  // `items` = JSON [{producto, estado, cantidad}]. Cada estado puede ser
+  // "disponible" (libera la celda), "pedido", "comprado" o "retirado". Sirve para
+  // corregir estados, cargar pedidos a mano o cancelar equivocados, todo junto.
+  // Mantiene la fecha original del pedido si ya existía. Solo admins.
+  if (p.action === "adminSetMaterialesBatch" && p.servicio && p.items) {
     if (!checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (PRODUCTOS.indexOf(p.producto) === -1) {
-      return jsonOut({ status: "error", message: "Producto inválido" });
-    }
-    const estado = (p.estado || "").toString().toLowerCase();
-    if (["disponible", "pedido", "comprado", "retirado"].indexOf(estado) === -1) {
-      return jsonOut({ status: "error", message: "Estado inválido" });
+    let items;
+    try { items = JSON.parse(p.items); } catch (e) { items = null; }
+    if (!Array.isArray(items) || !items.length) {
+      return jsonOut({ status: "error", message: "Nada para guardar" });
     }
     try {
-      const sheet  = getMaterialesSheet();
-      const header = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+      const sheet    = getMaterialesSheet();
+      const header   = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
       const tieneCol = header.indexOf(p.servicio) !== -1;
       // Servicio conocido o con columna ya creada (evita columnas basura por typo;
       // la UI solo manda servicios de la lista).
       if (!serviciosConocidos()[p.servicio] && !tieneCol) {
         return jsonOut({ status: "error", message: "Servicio inválido" });
       }
-      // Liberar algo que no tiene columna todavía: no hay nada que hacer.
-      if (estado === "disponible" && !tieneCol) {
-        return jsonOut({ status: "ok" });
-      }
+      const tz = Session.getScriptTimeZone();
+      let aplicados = 0;
+      items.forEach(function (it) {
+        const producto = (it.producto || "").toString();
+        const estado   = (it.estado || "").toString().toLowerCase();
+        if (PRODUCTOS.indexOf(producto) === -1) return;
+        if (["disponible", "pedido", "comprado", "retirado"].indexOf(estado) === -1) return;
+        if (estado === "disponible" && !tieneCol) return; // nada que liberar
 
-      const row  = getProductoRow(sheet, p.producto);
-      const col  = getServicioCol(sheet, p.servicio);
-      const cell = sheet.getRange(row, col);
-      const prev = parseEstadoCelda(cell.getValue());
+        const row  = getProductoRow(sheet, producto);
+        const col  = getServicioCol(sheet, p.servicio);
+        const cell = sheet.getRange(row, col);
+        const prev = parseEstadoCelda(cell.getValue());
 
-      if (estado === "disponible") {
-        if (prev.estado !== "disponible") {
-          cell.setValue("");
-          logPedido(p.admin, p.servicio, p.producto, "Liberado", prev.cantidad || "");
+        if (estado === "disponible") {
+          if (prev.estado !== "disponible") {
+            cell.setValue("");
+            logPedido(p.admin, p.servicio, producto, "Liberado", prev.cantidad || "");
+            aplicados++;
+          }
+          return;
         }
-        return jsonOut({ status: "ok" });
-      }
-
-      const cant   = normalizarCantidad(p.cantidad || prev.cantidad || 1);
-      const tz     = Session.getScriptTimeZone();
-      const fecha  = prev.fecha || Utilities.formatDate(new Date(), tz, "dd/MM/yyyy");
-      const kw     = estado === "pedido" ? "PEDIDO" : estado === "comprado" ? "COMPRADO" : "RETIRADO";
-      const accion = estado === "pedido" ? "Pedido" : estado === "comprado" ? "Comprado" : "Retirado";
-      cell.setNumberFormat("@").setValue(kw + " " + cant + " " + fecha);
-      logPedido(p.admin, p.servicio, p.producto, accion, cant);
-      return jsonOut({ status: "ok" });
+        const cant   = normalizarCantidad(it.cantidad || prev.cantidad || 1);
+        const fecha  = prev.fecha || Utilities.formatDate(new Date(), tz, "dd/MM/yyyy");
+        const kw     = estado === "pedido" ? "PEDIDO" : estado === "comprado" ? "COMPRADO" : "RETIRADO";
+        const accion = estado === "pedido" ? "Pedido" : estado === "comprado" ? "Comprado" : "Retirado";
+        cell.setNumberFormat("@").setValue(kw + " " + cant + " " + fecha);
+        logPedido(p.admin, p.servicio, producto, accion, cant);
+        aplicados++;
+      });
+      return jsonOut({ status: "ok", aplicados: aplicados });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }

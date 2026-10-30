@@ -800,31 +800,22 @@
     <button class="btn-refresh" onclick="loadAdminCompras()">🔄 Actualizar</button>
     <button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarPedidosCSV()">⬇️ Descargar lista para el distribuidor (CSV)</button>
     <div id="compras-total"></div>
-    <div class="section-title" style="margin-top:20px;">Ver / comprar por lugar</div>
+    <div class="section-title" style="margin-top:20px;">Ver / editar por lugar</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Entrá a un lugar para cambiar el estado de sus productos (comprado, pedido, retirado, liberar) y la cantidad; después tocás una sola vez "Guardar cambios".</div>
     <div id="compras-lugares"></div>
-
-    <div class="section-title" style="margin-top:22px;">✏️ Editar / corregir estados de un lugar</div>
-    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Cambiá el estado de cualquier producto (disponible, pedido, comprado, retirado) o la cantidad. Sirve para corregir o cargar algo a mano.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
-      <select id="mateditar-serv-sel" style="flex:1;min-width:160px;"></select>
-      <button class="btn btn-primary" style="margin:0;width:auto;flex-shrink:0;" onclick="abrirEditarMateriales()">✏️ Editar</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 4px;">
+      <select id="compras-serv-sel" style="flex:1;min-width:160px;"></select>
+      <button class="btn btn-primary" style="margin:0;width:auto;flex-shrink:0;" onclick="abrirComprasServicioSel()">Abrir lugar ›</button>
     </div>
 
-    <button class="btn btn-cambiar" onclick="openAdminPedidos()" style="margin-top:4px;">📦 Historial de pedidos</button>
+    <button class="btn btn-cambiar" onclick="openAdminPedidos()" style="margin-top:12px;">📦 Historial de pedidos</button>
   </div>
 
-  <!-- Materiales de un lugar (productos pendientes, con "Comprado") -->
+  <!-- Materiales de un lugar: editar estados de todos los productos + guardar todo junto -->
   <div id="admin-step-comprasserv" style="display:none;">
     <button class="btn btn-cambiar" onclick="openAdminCompras()">↩ Volver a materiales</button>
     <div class="section-title" style="margin-top:16px;" id="compras-serv-title"></div>
     <div id="compras-serv"></div>
-  </div>
-
-  <!-- Editar estados de todos los productos de un lugar (libertad total admin) -->
-  <div id="admin-step-mateditar" style="display:none;">
-    <button class="btn btn-cambiar" onclick="openAdminCompras()">↩ Volver a materiales</button>
-    <div class="section-title" style="margin-top:16px;" id="mateditar-title"></div>
-    <div id="mateditar-list"></div>
   </div>
 
   <!-- RESUMEN: todos los pedidos de materiales de todos, por día -->
@@ -2865,7 +2856,6 @@
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
     document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
     document.getElementById("admin-step-comprasserv").style.display = step === "comprasserv" ? "block" : "none";
-    document.getElementById("admin-step-mateditar").style.display = step === "mateditar" ? "block" : "none";
     document.getElementById("admin-step-supervisiones").style.display = step === "supervisiones" ? "block" : "none";
   }
 
@@ -4893,13 +4883,13 @@
 
   function openAdminCompras() {
     adminShowStep("compras");
-    llenarEditarServSelect();
+    llenarComprasServSelect();
     loadAdminCompras();
   }
 
-  // Lista plana (dedup) de TODOS los servicios de SERVICIOS, para el selector de
-  // edición de materiales. Incluye los libres (Horas Extras, etc.) porque también
-  // pueden tener materiales pedidos.
+  // Lista plana (dedup) de TODOS los servicios de SERVICIOS, para el selector que
+  // permite abrir cualquier lugar a editar (aunque no tenga pedidos activos).
+  // Incluye los libres (Horas Extras, etc.) porque también pueden tener materiales.
   function todosLosServiciosFront() {
     const set = {};
     Object.keys(SERVICIOS).forEach(emp =>
@@ -4907,12 +4897,17 @@
     return Object.keys(set).sort((a, b) => a.localeCompare(b));
   }
 
-  function llenarEditarServSelect() {
-    const sel = document.getElementById("mateditar-serv-sel");
+  function llenarComprasServSelect() {
+    const sel = document.getElementById("compras-serv-sel");
     if (!sel) return;
     const prev = sel.value;
     sel.innerHTML = todosLosServiciosFront().map(s => `<option value="${s}">${s}</option>`).join("");
     if (prev) sel.value = prev;
+  }
+
+  function abrirComprasServicioSel() {
+    const serv = document.getElementById("compras-serv-sel").value;
+    if (serv) verComprasServicio(encodeURIComponent(serv));
   }
 
   async function loadAdminCompras() {
@@ -4972,43 +4967,99 @@
       : `<div class="hist-empty">Ningún lugar con pedidos.</div>`;
   }
 
+  // Lista de estados posibles para los dropdowns de edición.
+  const MAT_ESTADOS = [
+    { v: "disponible", label: "Disponible" },
+    { v: "pedido",     label: "🛒 Pedido" },
+    { v: "comprado",   label: "🚚 Comprado" },
+    { v: "retirado",   label: "📦 Retirado" }
+  ];
+  let comprasServProductos = null;   // los 19 productos del servicio abierto, con estado
+
   function verComprasServicio(servEnc) {
     comprasServicioActual = decodeURIComponent(servEnc);
     adminShowStep("comprasserv");
-    renderComprasServicio();
+    cargarComprasServicio();
   }
 
-  function renderComprasServicio() {
+  // Trae TODOS los productos del servicio (con su estado) para poder editarlos.
+  async function cargarComprasServicio() {
     const serv = comprasServicioActual;
     document.getElementById("compras-serv-title").textContent = serv;
     const el = document.getElementById("compras-serv");
-    const items = (comprasRecords || []).filter(r => r.servicio === serv)
-      .sort((a, b) => a.producto.localeCompare(b.producto));
-    if (!items.length) { el.innerHTML = `<div class="hist-empty">Sin pedidos en este lugar.</div>`; return; }
-    el.innerHTML = items.map(r => {
-      const uni = r.cantidad ? ` · ${r.cantidad} u.` : "";
-      const accion = r.estado === "pedido"
-        ? `<button class="btn-mini btn-comprado" onclick="comprasMarcar('${encodeURIComponent(r.servicio)}','${encodeURIComponent(r.producto)}')">🛒 Comprado</button>`
-        : `<span class="mat-badge comprado">🚚 En camino</span>`;
-      return `
-      <div class="hist-row ${r.estado === 'pedido' ? 'salida' : 'entrada'}">
-        <div>
-          <div class="hr-serv">${r.producto}${uni}</div>
-          <div class="hr-hora">${r.estado === 'pedido' ? "Pedido" : "Comprado"} el ${r.fecha}</div>
-        </div>
-        ${accion}
-      </div>`;
-    }).join("");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando productos...</div>`;
+    try {
+      const j = await fetchJson({ action: "materiales", servicio: serv,
+                                  admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      comprasServProductos = j.productos || [];
+      renderComprasServicio();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
   }
 
-  async function comprasMarcar(servEnc, prodEnc) {
-    const servicio = decodeURIComponent(servEnc);
-    const producto = decodeURIComponent(prodEnc);
+  function matEstadoTexto(pr) {
+    if (pr.estado === "disponible") return "disponible";
+    const o = MAT_ESTADOS.find(x => x.v === pr.estado);
+    const lbl = o ? o.label : pr.estado;
+    return `${lbl}${pr.cantidad ? " · " + pr.cantidad + " u." : ""}${pr.fecha ? " · " + pr.fecha : ""}`;
+  }
+
+  // Cada producto con su estado en un dropdown + cantidad; un solo "Guardar
+  // cambios" al final (se guarda todo junto, solo lo que cambió).
+  function renderComprasServicio() {
+    const el = document.getElementById("compras-serv");
+    const productos = comprasServProductos || [];
+    if (!productos.length) { el.innerHTML = `<div class="hist-empty">Sin productos.</div>`; return; }
+    const filas = productos.map((pr, i) => {
+      const cant = parseInt(pr.cantidad, 10) || 1;
+      const opts = MAT_ESTADOS.map(o =>
+        `<option value="${o.v}"${o.v === pr.estado ? " selected" : ""}>${o.label}</option>`).join("");
+      const qStyle = pr.estado === "disponible" ? "width:46px;display:none;" : "width:46px;";
+      return `
+      <div class="hist-row" style="align-items:center;">
+        <div style="flex:1;min-width:0;">
+          <div class="hr-serv">${pr.nombre}</div>
+          <div class="hr-hora">${matEstadoTexto(pr)}</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
+          <select id="cs-est-${i}" onchange="matToggleQtyCS(${i})">${opts}</select>
+          <input id="cs-qty-${i}" type="number" min="1" max="99" value="${cant}" style="${qStyle}">
+        </div>
+      </div>`;
+    }).join("");
+    el.innerHTML = filas +
+      `<button class="btn btn-primary" style="margin-top:14px;" onclick="guardarCambiosServicio()">💾 Guardar cambios</button>`;
+  }
+
+  // Oculta la cantidad cuando el estado elegido es "disponible".
+  function matToggleQtyCS(i) {
+    const est = document.getElementById("cs-est-" + i).value;
+    document.getElementById("cs-qty-" + i).style.display = est === "disponible" ? "none" : "";
+  }
+
+  // Junta TODOS los cambios (estado o cantidad distintos del original) y los
+  // manda en una sola llamada (adminSetMaterialesBatch).
+  async function guardarCambiosServicio() {
+    const productos = comprasServProductos || [];
+    const items = [];
+    productos.forEach((pr, i) => {
+      const est = document.getElementById("cs-est-" + i).value;
+      const qty = parseInt(document.getElementById("cs-qty-" + i).value, 10) || 1;
+      const cant0 = parseInt(pr.cantidad, 10) || 1;
+      const cambio = est !== pr.estado || (est !== "disponible" && qty !== cant0);
+      if (cambio) items.push({ producto: pr.nombre, estado: est,
+                               cantidad: est === "disponible" ? "" : String(qty) });
+    });
+    if (!items.length) { alert("No hay cambios para guardar."); return; }
     try {
-      const j = await fetchJson({ action: "comprar", servicio, producto, admin: currentUser, hash: currentHash });
-      if (j.status !== "ok") { alert(j.message || "No se pudo marcar como comprado."); return; }
-      await loadAdminCompras();     // refresca datos (comprasRecords) y el landing
-      renderComprasServicio();      // re-dibuja la vista del lugar actual
+      const j = await fetchJson({ action: "adminSetMaterialesBatch", servicio: comprasServicioActual,
+        items: JSON.stringify(items), admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") { alert(j.message || "No se pudieron guardar los cambios."); return; }
+      comprasRecords = null;          // el landing quedó desactualizado
+      await cargarComprasServicio();  // releer el estado real del servicio
+      alert(`✅ ${j.aplicados || items.length} cambio(s) guardado(s).`);
     } catch (e) {
       alert("❌ Error: " + e.message);
     }
@@ -5051,87 +5102,6 @@
     URL.revokeObjectURL(url);
   }
 
-  // ---------- EDITAR ESTADOS DE UN SERVICIO (admin, libertad total) ----------
-  let mateditarServicio = null;
-  const MAT_ESTADOS = [
-    { v: "disponible", label: "Disponible" },
-    { v: "pedido",     label: "🛒 Pedido" },
-    { v: "comprado",   label: "🚚 Comprado" },
-    { v: "retirado",   label: "📦 Retirado" }
-  ];
-
-  function abrirEditarMateriales() {
-    const serv = document.getElementById("mateditar-serv-sel").value;
-    if (!serv) return;
-    mateditarServicio = serv;
-    adminShowStep("mateditar");
-    cargarEditarMateriales();
-  }
-
-  async function cargarEditarMateriales() {
-    document.getElementById("mateditar-title").textContent = "Materiales · " + mateditarServicio;
-    const el = document.getElementById("mateditar-list");
-    el.innerHTML = `<div class="hist-loading">⏳ Cargando productos...</div>`;
-    try {
-      const j = await fetchJson({ action: "materiales", servicio: mateditarServicio,
-                                  admin: currentUser, hash: currentHash });
-      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
-      renderEditarMateriales(j.productos || []);
-    } catch (e) {
-      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
-    }
-  }
-
-  function renderEditarMateriales(productos) {
-    const el = document.getElementById("mateditar-list");
-    if (!productos.length) { el.innerHTML = `<div class="hist-empty">Sin productos.</div>`; return; }
-    el.innerHTML = productos.map((pr, i) => {
-      const cant = parseInt(pr.cantidad, 10) || 1;
-      const opts = MAT_ESTADOS.map(o =>
-        `<option value="${o.v}"${o.v === pr.estado ? " selected" : ""}>${o.label}</option>`).join("");
-      const qtyHidden = pr.estado === "disponible" ? ' style="display:none;"' : "";
-      return `
-      <div class="hist-row" style="align-items:center;">
-        <div style="flex:1;min-width:0;">
-          <div class="hr-serv">${pr.nombre}</div>
-          <div class="hr-hora">${matEstadoTexto(pr)}</div>
-        </div>
-        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
-          <select id="mat-est-${i}" onchange="matToggleQty(${i})">${opts}</select>
-          <input id="mat-qty-${i}" type="number" min="1" max="99" value="${cant}" style="width:46px;"${qtyHidden}>
-          <button class="btn-mini btn-comprado" onclick="guardarEstadoMaterial(${i}, '${encodeURIComponent(pr.nombre)}')">Guardar</button>
-        </div>
-      </div>`;
-    }).join("");
-  }
-
-  function matEstadoTexto(pr) {
-    if (pr.estado === "disponible") return "disponible";
-    const o = MAT_ESTADOS.find(x => x.v === pr.estado);
-    const lbl = o ? o.label : pr.estado;
-    return `${lbl}${pr.cantidad ? " · " + pr.cantidad + " u." : ""}${pr.fecha ? " · " + pr.fecha : ""}`;
-  }
-
-  // Ocultar el campo cantidad cuando el estado elegido es "disponible".
-  function matToggleQty(i) {
-    const est = document.getElementById("mat-est-" + i).value;
-    document.getElementById("mat-qty-" + i).style.display = est === "disponible" ? "none" : "";
-  }
-
-  async function guardarEstadoMaterial(i, prodEnc) {
-    const producto = decodeURIComponent(prodEnc);
-    const estado = document.getElementById("mat-est-" + i).value;
-    const cantidad = document.getElementById("mat-qty-" + i).value || "1";
-    try {
-      const j = await fetchJson({ action: "adminSetMaterial", servicio: mateditarServicio,
-        producto, estado, cantidad, admin: currentUser, hash: currentHash });
-      if (j.status !== "ok") { alert(j.message || "No se pudo guardar."); return; }
-      comprasRecords = null;        // invalidar landing (cambió un estado)
-      await cargarEditarMateriales(); // releer estado real del servicio
-    } catch (e) {
-      alert("❌ Error: " + e.message);
-    }
-  }
 
   // ---------- ARRANQUE ----------
   // Si hay sesión guardada, entrar directo sin pedir login de nuevo.
