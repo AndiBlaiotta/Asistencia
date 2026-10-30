@@ -2155,6 +2155,62 @@ function doGet(e) {
     }
   }
 
+  // ---- ADMIN: fijar el estado de un producto para un servicio (libertad total) ----
+  // El admin puede poner cualquier producto en cualquier estado: "disponible"
+  // (libera la celda), "pedido", "comprado" o "retirado", con la cantidad que
+  // indique. Sirve para corregir un estado, cargar un pedido a mano o cancelar
+  // uno equivocado. Mantiene la fecha original del pedido si ya existía.
+  if (p.action === "adminSetMaterial" && p.servicio && p.producto) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    if (PRODUCTOS.indexOf(p.producto) === -1) {
+      return jsonOut({ status: "error", message: "Producto inválido" });
+    }
+    const estado = (p.estado || "").toString().toLowerCase();
+    if (["disponible", "pedido", "comprado", "retirado"].indexOf(estado) === -1) {
+      return jsonOut({ status: "error", message: "Estado inválido" });
+    }
+    try {
+      const sheet  = getMaterialesSheet();
+      const header = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+      const tieneCol = header.indexOf(p.servicio) !== -1;
+      // Servicio conocido o con columna ya creada (evita columnas basura por typo;
+      // la UI solo manda servicios de la lista).
+      if (!serviciosConocidos()[p.servicio] && !tieneCol) {
+        return jsonOut({ status: "error", message: "Servicio inválido" });
+      }
+      // Liberar algo que no tiene columna todavía: no hay nada que hacer.
+      if (estado === "disponible" && !tieneCol) {
+        return jsonOut({ status: "ok" });
+      }
+
+      const row  = getProductoRow(sheet, p.producto);
+      const col  = getServicioCol(sheet, p.servicio);
+      const cell = sheet.getRange(row, col);
+      const prev = parseEstadoCelda(cell.getValue());
+
+      if (estado === "disponible") {
+        if (prev.estado !== "disponible") {
+          cell.setValue("");
+          logPedido(p.admin, p.servicio, p.producto, "Liberado", prev.cantidad || "");
+        }
+        return jsonOut({ status: "ok" });
+      }
+
+      const cant   = normalizarCantidad(p.cantidad || prev.cantidad || 1);
+      const tz     = Session.getScriptTimeZone();
+      const fecha  = prev.fecha || Utilities.formatDate(new Date(), tz, "dd/MM/yyyy");
+      const kw     = estado === "pedido" ? "PEDIDO" : estado === "comprado" ? "COMPRADO" : "RETIRADO";
+      const accion = estado === "pedido" ? "Pedido" : estado === "comprado" ? "Comprado" : "Retirado";
+      cell.setNumberFormat("@").setValue(kw + " " + cant + " " + fecha);
+      logPedido(p.admin, p.servicio, p.producto, accion, cant);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ======================= SUPERVISOR =======================
 
   // ---- Registrar una visita de supervisión (checklist + GPS obligatorio) ----
