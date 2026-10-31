@@ -60,6 +60,7 @@
       align-items: flex-start;
       justify-content: center;
       padding: 20px;
+      overflow-x: hidden;   /* red de seguridad: nada arrastra la pantalla de costado */
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
@@ -274,15 +275,18 @@
     /* ---- TABS ---- */
     .tab-bar {
       display: flex;
+      flex-wrap: wrap;   /* con 5 tabs (supervisor) no entran en una fila: pasan a dos */
       border-bottom: 2px solid var(--border);
       margin-bottom: 20px;
     }
     .tab-btn {
-      flex: 1;
-      padding: 12px;
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 12px 8px;
       border: none;
       background: none;
-      font-size: 13px;
+      font-size: 12px;
+      white-space: nowrap;
       font-family: var(--font-body);
       font-weight: 700;
       color: var(--gray);
