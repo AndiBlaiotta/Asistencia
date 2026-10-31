@@ -1955,15 +1955,19 @@
   // Todos los servicios que supervisa (de SERVICIOS, dedup por nombre, menos los
   // excluidos como Acorus). Devuelve [{nombre, dir, horario}].
   function serviciosSupervisables() {
-    const vistos = {}, lista = [];
+    // Un servicio lo puede atender más de un empleado: junto a todos para que el
+    // supervisor sepa a quién evalúa. Conservo dir + horario (texto) del servicio.
+    const byName = {};
     Object.keys(SERVICIOS).forEach(emp => {
       (SERVICIOS[emp] || []).forEach(s => {
-        if (SERVICIOS_SIN_SUPERVISION.indexOf(s.nombre) !== -1 || vistos[s.nombre]) return;
-        vistos[s.nombre] = true;
-        lista.push({ nombre: s.nombre, dir: s.dir || "", horario: s.horario || null });
+        if (SERVICIOS_SIN_SUPERVISION.indexOf(s.nombre) !== -1) return;
+        if (!byName[s.nombre]) {
+          byName[s.nombre] = { nombre: s.nombre, dir: s.dir || "", horario: s.horario || null, empleados: [] };
+        }
+        if (byName[s.nombre].empleados.indexOf(emp) === -1) byName[s.nombre].empleados.push(emp);
       });
     });
-    return lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    return Object.keys(byName).map(n => byName[n]).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }
 
   function supShowView(view) {
@@ -2005,11 +2009,14 @@
       ${servicios.map(s => {
         const hecho = estaSemana[s.nombre];
         const n = s.nombre.replace(/'/g, "\\'");
+        const emp = (s.empleados && s.empleados.length) ? s.empleados.join(", ") : "Sin asignar";
+        const hor = (s.horario && s.horario.texto) ? s.horario.texto : "";
         return `
         <div class="hist-row ${hecho ? "" : "salida"}">
           <div>
             <div class="hr-serv">${hecho ? "✅" : "🔴"} ${s.nombre}</div>
-            <div class="hr-hora">${s.dir || ""}${hecho ? " · visitado el " + hecho : ""}</div>
+            <div class="hr-hora">👤 ${emp}${hor ? " · 🕐 " + hor : ""}</div>
+            <div class="hr-hora">📍 ${s.dir || "—"}${hecho ? " · visitado el " + hecho : ""}</div>
           </div>
           <button class="btn-mini btn-pedir" onclick="startSupVisita('${n}')">${hecho ? "Visitar otra vez" : "Registrar visita"}</button>
         </div>`;
@@ -2020,8 +2027,11 @@
     const s = serviciosSupervisables().find(x => x.nombre === nombre);
     if (!s) return;
     supFormServicio = s;
+    const emp = (s.empleados && s.empleados.length) ? s.empleados.join(", ") : "Sin asignar";
+    const hor = (s.horario && s.horario.texto) ? s.horario.texto : "";
     document.getElementById("sup-form-serv").textContent = s.nombre;
-    document.getElementById("sup-form-dir").textContent = s.dir || "";
+    document.getElementById("sup-form-dir").innerHTML =
+      `👤 ${emp}${hor ? " · 🕐 " + hor : ""}<br>📍 ${s.dir || "—"}`;
     document.getElementById("sup-obs").value = "";
     document.getElementById("sup-form-msg").textContent = "";
     document.getElementById("sup-checklist").innerHTML = SUPERVISION_ITEMS.map((it, i) => `
