@@ -369,7 +369,10 @@
     .btn-recibido { background: #dcfce7; color: #16a34a; border: 1.5px solid #bbf7d0; }
     .btn-comprado { background: #dbeafe; color: #2563eb; border: 1.5px solid #bfdbfe; }
     .btn-anular   { background: #fee2e2; color: #dc2626; border: 1.5px solid #fecaca; margin-top: 6px; }
-    .sup-nivel     { flex: 1; min-width: 70px; background: #f1f5f9; color: #334155; border: 1.5px solid #e2e8f0; }
+    .sup-nivel     { flex: 1; min-width: 60px; padding: 7px 4px; font-size: 11px;
+                     text-align: center; white-space: normal; line-height: 1.15;
+                     display: flex; align-items: center; justify-content: center;
+                     background: #f1f5f9; color: #334155; border: 1.5px solid #e2e8f0; }
     .sup-nivel.sel { background: var(--cyan); color: #fff; border-color: var(--cyan); }
     /* Selector de cantidad (empleado, al pedir) */
     .mat-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -1151,10 +1154,11 @@
 
   // Supervisores (espejo de SUPERVISORES en AppsScript.gs). Rol doble previsto:
   // empleado + supervisor; su pantalla muestra además la pestaña "🔍 Supervisión".
-  // ⚠️ VACÍO mientras es DEMO: nadie tiene el rol real todavía; el admin prueba la
-  // vista desde su panel ("🔍 Ver como supervisor (prueba)"). Al aprobar, agregar
-  // "Alejandro Jelvez" acá y en el backend. Servicios que NO supervisa: Acorus.
-  const SUPERVISORES = [];
+  // ACTIVO desde 2026-10-31: Alejandro Jelvez tiene el rol real (empleado +
+  // supervisor; ve la pestaña "🔍 Supervisión"). Espejo del backend (AppsScript.gs).
+  // El admin además puede probar la vista con "🔍 Ver como supervisor (prueba)".
+  // Servicios que NO supervisa: Acorus.
+  const SUPERVISORES = ["Alejandro Jelvez"];
   const SERVICIOS_SIN_SUPERVISION = ["Acorus"];
   const SUPERVISION_ITEMS = [
     "Limpieza", "Baño", "Vidrios", "Exterior", "Escaleras", "Ascensor",
@@ -2596,12 +2600,10 @@
           estadoHtml = `<div class="mat-fecha">⏳ Pedido${uni ? " (" + uni + ")" : ""} el ${p.fecha} — esperando compra</div>`;
           accionHtml = `<span class="mat-badge" style="background:#fef3c7;color:#b45309;">⏳ Pendiente</span>`;
         } else if (p.estado === "comprado") {
-          // DEMO: mientras no haya supervisor activo, el empleado sigue recibiendo
-          // desde "comprado" (flujo actual, sin romper nada). Al activar el supervisor
-          // para el resto, cambiar a: mostrar "lo retira el supervisor" sin botón, y
-          // que "Recibido" aparezca recién en el estado "retirado" (ver bloque de abajo).
-          estadoHtml = `<div class="mat-fecha comprado">🛒 Comprado${uni ? " (" + uni + ")" : ""} — en camino</div>`;
-          accionHtml = `<button class="btn-mini btn-recibido" onclick="marcarRecibido(${i})">✅ Recibido</button>`;
+          // Supervisor ACTIVO (2026-10-31): comprado = lo retira el supervisor, sin
+          // botón para el empleado. El "Recibido" aparece recién en "retirado".
+          estadoHtml = `<div class="mat-fecha comprado">🛒 Comprado${uni ? " (" + uni + ")" : ""} — lo retira el supervisor</div>`;
+          accionHtml = `<span class="mat-badge comprado">🚚 Lo retira el supervisor</span>`;
         } else if (p.estado === "retirado") {
           estadoHtml = `<div class="mat-fecha comprado">🚚 Retirado${uni ? " (" + uni + ")" : ""} — el supervisor lo lleva</div>`;
           accionHtml = `<button class="btn-mini btn-recibido" onclick="marcarRecibido(${i})">✅ Recibido</button>`;
