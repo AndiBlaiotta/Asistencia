@@ -177,10 +177,10 @@ const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 // y retiran los materiales comprados. Rol DOBLE previsto para Alejandro (sigue en
 // EMPLEADOS y además supervisor). Ver front (SUPERVISORES duplicado) y hoja
 // "Supervisiones". Cambiar = tocar ambos.
-// ⚠️ VACÍO a propósito mientras es DEMO: el admin prueba la vista de supervisor
-// desde su panel (con sus credenciales), sin activarle el rol a nadie. Al aprobar,
-// agregar "Alejandro Jelvez" acá y en el front para activarlo de verdad.
-const SUPERVISORES = [];
+// ACTIVO desde 2026-10-31: Alejandro Jelvez tiene el rol (sigue como empleado +
+// supervisor). Ve la pestaña "🔍 Supervisión" (visitas/checklist + retirar
+// materiales). Espejo en el front (index.html). Cambiar = tocar ambos.
+const SUPERVISORES = ["Alejandro Jelvez"];
 
 // Servicios que el supervisor NO visita (los deja fuera de su lista y del control
 // de visitas semanales).
