@@ -101,7 +101,14 @@ const AUSENCIAS_LOOKBACK_DIAS = 60;
 // registradas antes se borran solas en la próxima detección.
 const SERVICIOS_DESDE = {
   "Alejandro Jelvez|Del Cimarron": "26/09/2026",
-  "Rebeca Ayala|Arredondo": "02/10/2026"
+  // Reasignación de servicios de Alejandro (cutover 02/11/2026). Las altas nuevas
+  // evitan faltas retroactivas; el front además oculta el servicio hasta esta fecha.
+  "Milagros Acuña|Rivadavia": "02/11/2026",
+  "Milagros Acuña|Del Himno": "02/11/2026",
+  "Milagros Acuña|Garcia Silva": "02/11/2026",
+  "Milagros Acuña|Suipacha": "02/11/2026",
+  "Rebeca Ayala|Jonte": "02/11/2026",
+  "Maria Decimas|Arredondo": "02/11/2026"
 };
 function servicioDesdeInt(empleado, servicio) {
   const f = SERVICIOS_DESDE[empleado + "|" + servicio];
@@ -760,7 +767,8 @@ const HORARIOS = {
     "Bayardi":    { 1: ["08:00", "11:00"], 3: ["08:00", "11:00"], 5: ["10:00", "13:00"] },
     "Elflein":    { 2: ["10:30", "13:30"], 4: ["10:30", "13:30"] },
     "Drago":      { 1: ["11:00", "14:00"], 3: ["11:00", "14:00"], 5: ["13:00", "16:00"] },
-    "Monteverde": { 2: ["13:40", "16:40"], 4: ["13:40", "16:40"] }
+    "Monteverde": { 2: ["13:40", "16:40"], 4: ["13:40", "16:40"] },
+    "Arredondo":  { 1: ["14:30", "17:30"], 3: ["14:30", "17:30"], 6: ["08:00", "11:00"] }
   },
   "Celeste Freire": {
     "Acorus": { 1: ["08:00", "16:00"], 2: ["08:00", "16:00"], 3: ["08:00", "16:00"],
@@ -782,18 +790,18 @@ const HORARIOS = {
     "Mitre":      { 2: ["08:00", "12:00"], 4: ["08:00", "12:00"], 6: ["08:00", "12:00"] },
     "Santa Rosa": { 1: ["08:00", "12:00"], 3: ["08:00", "12:00"], 5: ["08:00", "12:00"] },
     "Mercedes":   { 1: ["12:30", "14:30"], 3: ["12:30", "14:30"], 5: ["12:30", "14:30"] },
-    "Arredondo":  { 1: ["14:30", "17:30"], 3: ["14:30", "17:30"], 5: ["14:30", "17:30"] }
+    "Jonte":      { 2: ["12:30", "16:30"], 4: ["12:30", "16:30"] }
   },
   "Alejandro Jelvez": {
-    "Rivadavia":    { 1: ["09:00", "12:00"], 4: ["09:00", "12:00"] },
-    "Suipacha":     { 2: ["12:30", "15:30"], 5: ["12:30", "15:30"] },
-    "Del Himno":    { 2: ["09:00", "12:00"], 5: ["09:00", "12:00"] },
-    "Garcia Silva": { 1: ["12:30", "15:30"], 4: ["12:30", "15:30"] },
     "San Martín":   { 1: ["16:00", "18:00"], 3: ["16:00", "18:00"], 5: ["16:00", "18:00"] },
     "Del Cimarron": { 2: ["16:00", "18:00"], 6: ["08:00", "10:00"] }
   },
   "Milagros Acuña": {
-    "Jonte": { 2: ["08:00", "12:00"], 4: ["08:00", "12:00"], 6: ["08:00", "12:00"] }
+    "Rivadavia":    { 1: ["08:00", "11:00"], 4: ["08:00", "11:00"] },
+    "Del Himno":    { 2: ["08:00", "11:00"], 5: ["08:00", "11:00"] },
+    "Garcia Silva": { 1: ["11:30", "14:30"], 4: ["11:30", "14:30"] },
+    "Suipacha":     { 2: ["11:30", "14:30"], 5: ["11:30", "14:30"] },
+    "Jonte":        { 6: ["08:00", "12:00"] }
   }
 };
 
