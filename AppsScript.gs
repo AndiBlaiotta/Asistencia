@@ -174,7 +174,8 @@ const PRODUCTOS_POR_SERVICIO = {
   "Consultorios Médicos": [
     'Lavandina en gel "QM" x 600ml',
     'Desinfectante Antibacterial en gel Cif x 2 kg',
-    'Pala plástica c/cabo fijo colores'
+    'Pala plástica c/cabo fijo colores',
+    'Desinfectante en aerosol Original "Lysoform" x 420 cc'
   ]
 };
 
