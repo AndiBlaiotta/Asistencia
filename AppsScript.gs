@@ -141,26 +141,30 @@ const TIEMPO_EXTRA_DESDE   = "01/09/2026";
 const TIEMPO_EXTRA_VISIBLE_EMPLEADO = true;
 
 // Lista maestra de productos/materiales (filas de "Materiales y productos").
+// Orden ALFABÉTICO (pedido de Andi, 2026-11-02): la lista se muestra ordenada
+// en la selección del empleado y en el editor por lugar del admin (ambos usan el
+// endpoint "materiales", que mapea este array). El resumen del admin y la planilla
+// de descarga ordenan por su cuenta (localeCompare). Mantener alfabético al agregar.
 const PRODUCTOS = [
-  'Guantes "Steff"',
-  'Escobillón grande "Fede"',
-  'Secador reforzado blanco "SG" N 40',
   'Balde plástico reforzado 13 lts',
-  'Trapo piso consorcio gris "Fibran Sur"',
-  'Pano microfibra "Sina"',
-  'Rejilla "Fibran Sur" semipesada',
+  'Blem para muebles',
+  'Bolsa de consorcio 90x120 50 unidades',
+  'Desengrasante Cocina Cif ultra rapido x 5 lts',
+  'Desengrasante multiuso "QM" 5 lts',
+  'Desinfectante amonio cuaternario Antibactervid19 x 5 lt',
+  'Desodorante de ambiente "Odorite"',
   'Desodorante para piso "Starbel" 5 lts',
+  'Detergente limón "Starbel" 5 lts',
+  'Escobillón grande "Fede"',
+  'Guantes "Steff"',
+  'Guantes institucionales negros super reforzados "Jorgito"',
   'Lavandina "Starbel" 5 lts',
   'Limpia vidrios "QM" 5 lts',
-  'Desengrasante multiuso "QM" 5 lts',
-  'Blem para muebles',
+  'Pano microfibra "Sina"',
   'Prod. ascensor/metales "Venus" 425ml',
-  'Desodorante de ambiente "Odorite"',
-  'Bolsa de consorcio 90x120 50 unidades',
-  'Detergente limón "Starbel" 5 lts',
-  'Guantes institucionales negros super reforzados "Jorgito"',
-  'Desinfectante amonio cuaternario Antibactervid19 x 5 lt',
-  'Desengrasante Cocina Cif ultra rapido x 5 lts'
+  'Rejilla "Fibran Sur" semipesada',
+  'Secador reforzado blanco "SG" N 40',
+  'Trapo piso consorcio gris "Fibran Sur"'
 ];
 
 const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto", "Acción", "Cantidad"];

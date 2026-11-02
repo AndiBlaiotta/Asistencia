@@ -4928,7 +4928,7 @@
     });
 
     const totalEl = document.getElementById("compras-total");
-    const nombres = Object.keys(prod).sort((a, b) => prod[b] - prod[a]);
+    const nombres = Object.keys(prod).sort((a, b) => a.localeCompare(b));
     totalEl.innerHTML = nombres.length ? `
       <div class="hist-row" style="background:var(--cyan-light);">
         <div><div class="hr-serv">Total a comprar</div></div>
