@@ -82,7 +82,8 @@ const VACAS_CONFIG = {
   "Sabrina Scarampo": { alta: "16/03/2026", tomadasPrevias: 0 },
   "Rebeca Ayala":     { alta: "15/05/2026", tomadasPrevias: 0 },
   "Alejandro Jelvez": { alta: "01/06/2026", tomadasPrevias: 0 },
-  "Milagros Acuña":   { alta: "01/07/2026", tomadasPrevias: 0 }
+  "Milagros Acuña":   { alta: "01/07/2026", tomadasPrevias: 0 },
+  "Iara Gimenez":     { alta: "01/11/2026", tomadasPrevias: 0 }
 };
 
 // ---- Ausencias (faltas): días/servicios que le tocaban y no fichó ----
@@ -202,7 +203,8 @@ const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto
 
 const EMPLEADOS = [
   "Maria Decimas", "Celeste Freire", "Rocio Medina", "Brisa Medina",
-  "Sabrina Scarampo", "Rebeca Ayala", "Alejandro Jelvez", "Milagros Acuña"
+  "Sabrina Scarampo", "Rebeca Ayala", "Alejandro Jelvez", "Milagros Acuña",
+  "Iara Gimenez"
 ];
 const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
 
@@ -265,7 +267,10 @@ const LEGACY_HASH = {
   "Martín Fiorentino": "81cd05e8571da7b0e1e3ff4ec60923852c3d387b2c28e84c0dd749de6f2fbd36",
   // Milagros Acuña: contraseña inicial "milagros123" (la cambia sí o sí en su
   // primer login, porque setupAuth la siembra con "cambio obligatorio").
-  "Milagros Acuña":    "092af857f5f8db337c4b44375ea6672c1e80399fe86dda8708d5f58d16ce03f3"
+  "Milagros Acuña":    "092af857f5f8db337c4b44375ea6672c1e80399fe86dda8708d5f58d16ce03f3",
+  // Iara Gimenez (comodín): contraseña inicial "iara123" (la cambia en su primer
+  // login: el fallback de LEGACY_HASH la marca con "cambio obligatorio").
+  "Iara Gimenez":      "38ca87413835fbf3122c4b48b30368bfa0792c08cef9f95405726b7588274674"
 };
 
 function jsonOut(obj) {
@@ -828,7 +833,9 @@ const HORARIOS = {
     "Garcia Silva": { 1: ["11:30", "14:30"], 4: ["11:30", "14:30"] },
     "Suipacha":     { 2: ["11:30", "14:30"], 5: ["11:30", "14:30"] },
     "Jonte":        { 6: ["08:00", "12:00"] }
-  }
+  },
+  // Comodín: cubre a otros vía Coberturas; no tiene servicios propios.
+  "Iara Gimenez": {}
 };
 
 const DIAS_NOMBRE = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"];
@@ -1193,7 +1200,7 @@ function esFeriado(fechaInt) { return !!FERIADOS_SET[fechaInt]; }
 // ---- Horas extra ----
 // Horas semanales de contrato de un empleado (jornada completa 44 / reducida 24).
 function horasContratoSemanal(empleado) {
-  return empleado === "Milagros Acuña" ? 24 : 44;
+  return (empleado === "Milagros Acuña" || empleado === "Iara Gimenez") ? 24 : 44;
 }
 
 // Horas ASIGNADAS por semana a un empleado (suma de la duración de todos sus
