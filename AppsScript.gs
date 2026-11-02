@@ -167,6 +167,27 @@ const PRODUCTOS = [
   'Trapo piso consorcio gris "Fibran Sur"'
 ];
 
+// Productos que aparecen SOLO en ciertos servicios (además de los globales de
+// PRODUCTOS). Pedido de Andi (2026-11-02): Consultorios Médicos tiene 3 extra.
+// Clave = nombre exacto del servicio (ver SERVICIOS en index.html).
+const PRODUCTOS_POR_SERVICIO = {
+  "Consultorios Médicos": [
+    'Lavandina en gel "QM" x 600ml',
+    'Desinfectante Antibacterial en gel Cif x 2 kg',
+    'Pala plástica c/cabo fijo colores'
+  ]
+};
+
+// Lista de productos disponible para un servicio: los globales + los extra del
+// servicio, en orden alfabético. esProductoValido() valida pedidos/compras.
+function productosDeServicio(servicio) {
+  return PRODUCTOS.concat(PRODUCTOS_POR_SERVICIO[servicio] || [])
+                  .sort(function (a, b) { return a.localeCompare(b); });
+}
+function esProductoValido(servicio, producto) {
+  return productosDeServicio(servicio).indexOf(producto) !== -1;
+}
+
 const HIST_PEDIDOS_HEADERS = ["Fecha", "Hora", "Empleado", "Servicio", "Producto", "Acción", "Cantidad"];
 
 // ============================================================
@@ -2040,7 +2061,7 @@ function doGet(e) {
       const grid = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
       const filaPorProducto = {};
       grid.forEach(r => { filaPorProducto[r[0]] = r; });
-      const productos = PRODUCTOS.map(nombre => {
+      const productos = productosDeServicio(p.servicio).map(nombre => {
         const r     = filaPorProducto[nombre];
         const texto = (r ? (r[col - 1] || "") : "").toString();
         const est   = parseEstadoCelda(texto);
@@ -2057,7 +2078,7 @@ function doGet(e) {
     if (!checkAuth(p.empleado, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (PRODUCTOS.indexOf(p.producto) === -1) {
+    if (!esProductoValido(p.servicio, p.producto)) {
       return jsonOut({ status: "error", message: "Producto inválido" });
     }
     try {
@@ -2086,7 +2107,7 @@ function doGet(e) {
     if (!checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (PRODUCTOS.indexOf(p.producto) === -1) {
+    if (!esProductoValido(p.servicio, p.producto)) {
       return jsonOut({ status: "error", message: "Producto inválido" });
     }
     try {
@@ -2115,7 +2136,7 @@ function doGet(e) {
     if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (PRODUCTOS.indexOf(p.producto) === -1) {
+    if (!esProductoValido(p.servicio, p.producto)) {
       return jsonOut({ status: "error", message: "Producto inválido" });
     }
     try {
@@ -2145,7 +2166,7 @@ function doGet(e) {
     if (!checkAuth(p.empleado, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (PRODUCTOS.indexOf(p.producto) === -1) {
+    if (!esProductoValido(p.servicio, p.producto)) {
       return jsonOut({ status: "error", message: "Producto inválido" });
     }
     try {
@@ -2195,7 +2216,7 @@ function doGet(e) {
       items.forEach(function (it) {
         const producto = (it.producto || "").toString();
         const estado   = (it.estado || "").toString().toLowerCase();
-        if (PRODUCTOS.indexOf(producto) === -1) return;
+        if (!esProductoValido(p.servicio, producto)) return;
         if (["disponible", "pedido", "comprado", "retirado"].indexOf(estado) === -1) return;
         if (estado === "disponible" && !tieneCol) return; // nada que liberar
 
