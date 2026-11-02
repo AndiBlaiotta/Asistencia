@@ -541,13 +541,6 @@
     <button class="btn btn-cambiar" style="margin:0;width:auto;flex-shrink:0;" onclick="salirVistaPrevia()">↩ Salir de la vista previa</button>
   </div>
 
-  <div id="sup-demo-banner" style="display:none;background:#cffafe;color:#155e75;font-weight:800;
-       border-radius:12px;padding:10px 14px;margin-bottom:14px;
-       align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-    <span>🔍 Demo de Supervisor — así se vería. En modo prueba NO se guardan datos.</span>
-    <button class="btn btn-cambiar" style="margin:0;width:auto;flex-shrink:0;" onclick="salirSupervisorDemo()">↩ Volver al panel admin</button>
-  </div>
-
   <!-- Header con nombre y reloj -->
   <div class="user-header">
     <div class="mini-logo">
@@ -775,15 +768,11 @@
 
     <!-- Vista previa: ver la app tal como la ve un empleado (modo prueba) -->
     <div class="section-title">👁️ Ver la app como un empleado</div>
-    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Modo prueba: navegás la app como la ve el empleado elegido. No se registran datos.</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Modo prueba: navegás la app como la ve el empleado elegido. No se registran datos. Si el empleado es supervisor (Alejandro), también vas a ver su pestaña 🔍 Supervisión con sus datos reales.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
       <select id="preview-emp-sel" style="flex:1;min-width:160px;"></select>
       <button class="btn btn-primary" style="margin:0;width:auto;flex-shrink:0;" onclick="iniciarVistaPrevia()">👁️ Ver</button>
     </div>
-
-    <div class="section-title">🔍 Ver como supervisor (prueba)</div>
-    <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Modo prueba del acceso de supervisor (visitas, checklist, retirar materiales, ver fichadas). No se guardan datos. Todavía no está activado para ningún supervisor.</div>
-    <button class="btn btn-primary" style="margin-bottom:18px;" onclick="verSupervisorDemo()">🔍 Probar vista de supervisor</button>
 
     <div class="section-title">Ver un empleado en particular</div>
     <div id="admin-emp-list"></div>
@@ -1162,7 +1151,7 @@
   // empleado + supervisor; su pantalla muestra además la pestaña "🔍 Supervisión".
   // ACTIVO desde 2026-10-31: Alejandro Jelvez tiene el rol real (empleado +
   // supervisor; ve la pestaña "🔍 Supervisión"). Espejo del backend (AppsScript.gs).
-  // El admin además puede probar la vista con "🔍 Ver como supervisor (prueba)".
+  // El admin puede ver esa pestaña desde "👁️ Ver la app como un empleado" → Alejandro.
   // Servicios que NO supervisa: Acorus.
   const SUPERVISORES = ["Alejandro Jelvez"];
   const SERVICIOS_SIN_SUPERVISION = ["Acorus"];
@@ -1982,11 +1971,20 @@
     if (view === "fichadas")   initSupFichadas();
   }
 
+  // En vista previa, el admin consulta los datos del supervisor previsualizado
+  // (usuario) autenticando con SUS credenciales reales de admin (admin). Fuera
+  // de la vista previa, el supervisor usa sus propias credenciales.
+  function supAuth() {
+    return previewMode
+      ? { usuario: currentUser, admin: previewAdmin.user, hash: previewAdmin.hash }
+      : { usuario: currentUser, hash: currentHash };
+  }
+
   async function cargarSupVisitas() {
     const el = document.getElementById("sup-visitas-list");
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
-      const j = await fetchJson({ action: "misSupervisiones", usuario: currentUser, hash: currentHash });
+      const j = await fetchJson({ action: "misSupervisiones", ...supAuth() });
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
       supVisitasCache = j;
       renderSupVisitas();
@@ -2072,7 +2070,7 @@
     const msg = document.getElementById("sup-form-msg");
     msg.className = ""; msg.textContent = "";
     if (!supFormServicio) return;
-    if (supPreview) { msg.className = "success"; msg.textContent = "🔍 Demo: en modo prueba la visita NO se guarda. Así se vería el guardado."; return; }
+    if (previewMode) { msg.className = "success"; msg.textContent = "👁️ Vista previa: la visita NO se guarda (solo estás viendo cómo lo usa el supervisor)."; return; }
     if (!currentCoords) { msg.className = "error"; msg.textContent = "Falta la ubicación (GPS). Activala e intentá de nuevo."; return; }
     const items = {};
     document.querySelectorAll("#sup-checklist .sup-niveles").forEach(cont => {
@@ -2104,7 +2102,7 @@
     const el = document.getElementById("sup-mat-list");
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
-      const j = await fetchJson({ action: "supMaterialesComprados", usuario: currentUser, hash: currentHash });
+      const j = await fetchJson({ action: "supMaterialesComprados", ...supAuth() });
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
       const recs = j.records || [];
       if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay materiales comprados para retirar.</div>`; return; }
@@ -2125,7 +2123,7 @@
   }
 
   async function retirarMaterial(servicio, producto, btn) {
-    if (supPreview) { alert("🔍 Demo: en modo prueba no se retira nada."); return; }
+    if (bloqueaPreview()) return;
     btn.disabled = true;
     try {
       const j = await fetchJson({ action: "retirar", usuario: currentUser, hash: currentHash, servicio, producto });
@@ -2151,7 +2149,7 @@
     if (!emp) { el.innerHTML = ""; return; }
     el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
-      const j = await fetchJson({ action: "supHistorial", usuario: currentUser, hash: currentHash, empleado: emp });
+      const j = await fetchJson({ action: "supHistorial", ...supAuth(), empleado: emp });
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
       const recs = j.records || [];
       if (!recs.length) { el.innerHTML = `<div class="hist-empty">Sin fichadas.</div>`; return; }
@@ -2793,6 +2791,11 @@
     document.getElementById("mat-sin-servicio").style.display = "block";
     document.getElementById("mat-con-servicio").style.display = "none";
     document.getElementById("hist-content").innerHTML = `<div class="hist-empty">Tocá "Actualizar historial" para ver los registros.</div>`;
+    // Pestañas del empleado visibles; la de Supervisión solo si el elegido es supervisor.
+    ["registrar", "materiales", "historial", "vacaciones"].forEach(t =>
+      document.getElementById("tbtn-" + t).style.display = "");
+    document.getElementById("tbtn-supervision").style.display =
+      esSupervisorFront(emp) ? "" : "none";
     startClock();
     getLocation();
     renderServices();
@@ -2808,6 +2811,7 @@
     selectedService = null;
     clearInterval(clockInterval);
     document.getElementById("preview-banner").style.display = "none";
+    document.getElementById("tbtn-supervision").style.display = "none";
     document.getElementById("screen-home").style.display = "none";
     document.getElementById("screen-admin").style.display = "block";
     adminShowStep("empleados");
@@ -2820,38 +2824,6 @@
       return true;
     }
     return false;
-  }
-
-  // ---------- DEMO SUPERVISOR (desde el panel admin) ----------
-  // El admin prueba la pantalla del supervisor con sus propias credenciales (los
-  // endpoints de supervisor aceptan admin). Las escrituras se bloquean (supPreview).
-  let supPreview = false;
-  const TABS_EMPLEADO = ["registrar", "materiales", "historial", "vacaciones"];
-
-  function verSupervisorDemo() {
-    supPreview = true;
-    document.getElementById("screen-admin").style.display = "none";
-    document.getElementById("screen-home").style.display = "block";
-    document.getElementById("sup-demo-banner").style.display = "flex";
-    document.getElementById("display-nombre").textContent = currentUser + " (demo supervisor)";
-    // Mostrar SOLO la pestaña de supervisión.
-    TABS_EMPLEADO.forEach(t => document.getElementById("tbtn-" + t).style.display = "none");
-    document.getElementById("tbtn-supervision").style.display = "";
-    startClock();
-    getLocation();
-    switchTab("supervision");
-  }
-
-  function salirSupervisorDemo() {
-    supPreview = false;
-    clearInterval(clockInterval);
-    document.getElementById("sup-demo-banner").style.display = "none";
-    // Restaurar visibilidad normal de las pestañas de empleado.
-    TABS_EMPLEADO.forEach(t => document.getElementById("tbtn-" + t).style.display = "");
-    document.getElementById("tbtn-supervision").style.display = "none";
-    document.getElementById("screen-home").style.display = "none";
-    document.getElementById("screen-admin").style.display = "block";
-    adminShowStep("empleados");
   }
 
   function adminShowStep(step) {

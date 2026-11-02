@@ -2272,9 +2272,10 @@ function doGet(e) {
   }
 
   // ---- Supervisor: sus propias visitas (últimos ~90 días) para el semáforo ----
-  // Acepta admin para la vista DEMO del panel de administración.
+  // Acepta admin (p.admin) para que el panel pueda ver, en la vista previa de un
+  // empleado, las visitas reales del supervisor previsualizado (p.usuario).
   if (p.action === "misSupervisiones") {
-    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.admin || p.usuario, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
@@ -2302,7 +2303,7 @@ function doGet(e) {
 
   // ---- Supervisor/Admin: materiales en estado COMPRADO, listos para retirar ----
   if (p.action === "supMaterialesComprados") {
-    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.admin || p.usuario, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
@@ -2333,9 +2334,9 @@ function doGet(e) {
   }
 
   // ---- Supervisor: ver las fichadas (entrada/salida) de un empleado ----
-  // Acepta admin para la vista DEMO del panel de administración.
+  // Acepta admin (p.admin) para la vista previa del supervisor en el panel.
   if (p.action === "supHistorial" && p.empleado) {
-    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.usuario, p.hash)) {
+    if (!checkSupervisor(p.usuario, p.hash) && !checkAdmin(p.admin || p.usuario, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
