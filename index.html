@@ -794,7 +794,7 @@
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
     <div class="section-title" style="margin-top:16px;">Materiales · falta comprar (total por producto)</div>
     <button class="btn-refresh" onclick="loadAdminCompras()">🔄 Actualizar</button>
-    <button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarPedidosCSV()">⬇️ Descargar lista para el distribuidor (CSV)</button>
+    <button class="btn btn-primary" style="margin-bottom:12px;" onclick="descargarPedidosCSV()">⬇️ Descargar lista para el distribuidor (Excel)</button>
     <div id="compras-total"></div>
     <div class="section-title" style="margin-top:20px;">Ver / editar por lugar</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Entrá a un lugar para cambiar el estado de sus productos (comprado, pedido, retirado, liberar) y la cantidad; después tocás una sola vez "Guardar cambios".</div>
@@ -5056,38 +5056,66 @@
   }
 
   // ---------- DESCARGA PARA EL DISTRIBUIDOR ----------
-  // Lista de lo que está PEDIDO (falta comprar) en CSV: un bloque con el total
-  // por producto (lo que el distribuidor prepara) y otro con el detalle por
-  // servicio (a dónde va cada cosa). Usa comprasRecords (adminPedidosActivos).
+  // Lista de lo que está PEDIDO (falta comprar) como archivo Excel (.xls, tabla
+  // HTML que Excel abre con columnas reales, sin problemas de separador/idioma):
+  // (1) TOTAL POR PRODUCTO = lo que el distribuidor prepara (suma de todos los
+  // servicios), y (2) DETALLE POR SERVICIO = cada lugar con sus cosas y su
+  // subtotal. Usa comprasRecords (adminPedidosActivos).
   function descargarPedidosCSV() {
     const recs = (comprasRecords || []).filter(r => r.estado === "pedido");
     if (!recs.length) { alert("No hay materiales pedidos para descargar."); return; }
+
+    // Total por producto (suma de cantidades en todos los servicios).
     const prod = {};
     recs.forEach(r => { const q = parseInt(r.cantidad, 10) || 0; prod[r.producto] = (prod[r.producto] || 0) + q; });
+
+    // Agrupado por servicio.
+    const porServicio = {};
+    recs.forEach(r => { (porServicio[r.servicio] = porServicio[r.servicio] || []).push(r); });
+
     const hoy = new Date();
     const dd = String(hoy.getDate()).padStart(2, "0");
     const mm = String(hoy.getMonth() + 1).padStart(2, "0");
     const fechaHoy = `${dd}/${mm}/${hoy.getFullYear()}`;
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-    const rows = [];
-    rows.push(["LISTA DE MATERIALES PEDIDOS", fechaHoy]);
-    rows.push([]);
-    rows.push(["TOTAL POR PRODUCTO"]);
-    rows.push(["Producto", "Cantidad"]);
-    Object.keys(prod).sort((a, b) => a.localeCompare(b)).forEach(n => rows.push([n, prod[n]]));
-    rows.push([]);
-    rows.push(["DETALLE POR SERVICIO"]);
-    rows.push(["Servicio", "Producto", "Cantidad", "Fecha del pedido"]);
-    recs.slice()
-      .sort((a, b) => a.servicio.localeCompare(b.servicio) || a.producto.localeCompare(b.producto))
-      .forEach(r => rows.push([r.servicio, r.producto, r.cantidad, r.fecha]));
+    let h = "";
+    h += `<tr><td colspan="3" style="font-size:16px;font-weight:bold;">LISTA DE MATERIALES PEDIDOS</td></tr>`;
+    h += `<tr><td colspan="3">Fecha: ${fechaHoy}</td></tr>`;
+    h += `<tr><td colspan="3"></td></tr>`;
 
-    const csv = "﻿" + rows.map(row => row.map(csvCampo).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    // (1) TOTAL POR PRODUCTO
+    h += `<tr><td colspan="3" style="background:#1a8fbe;color:#ffffff;font-weight:bold;">TOTAL POR PRODUCTO (lo que hay que comprar)</td></tr>`;
+    h += `<tr style="background:#e2e8f0;font-weight:bold;"><td>Producto</td><td>Cantidad total</td><td></td></tr>`;
+    Object.keys(prod).sort((a, b) => a.localeCompare(b)).forEach(n => {
+      h += `<tr><td>${esc(n)}</td><td style="text-align:center;">${prod[n]}</td><td></td></tr>`;
+    });
+    h += `<tr><td colspan="3"></td></tr>`;
+
+    // (2) DETALLE POR SERVICIO: cada lugar con sus cosas + subtotal.
+    h += `<tr><td colspan="3" style="background:#1a8fbe;color:#ffffff;font-weight:bold;">DETALLE POR SERVICIO (a dónde va cada cosa)</td></tr>`;
+    Object.keys(porServicio).sort((a, b) => a.localeCompare(b)).forEach(serv => {
+      const items = porServicio[serv].slice().sort((a, b) => a.producto.localeCompare(b.producto));
+      let sub = 0; items.forEach(r => sub += parseInt(r.cantidad, 10) || 0);
+      h += `<tr><td colspan="3"></td></tr>`;
+      h += `<tr><td colspan="3" style="background:#cffafe;font-weight:bold;">${esc(serv)} — ${sub} ${sub === 1 ? "unidad" : "unidades"} en total</td></tr>`;
+      h += `<tr style="background:#f1f5f9;font-weight:bold;"><td>Producto</td><td>Cantidad</td><td>Pedido el</td></tr>`;
+      items.forEach(r => {
+        h += `<tr><td>${esc(r.producto)}</td><td style="text-align:center;">${parseInt(r.cantidad, 10) || 0}</td><td>${esc(r.fecha)}</td></tr>`;
+      });
+    });
+
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">` +
+      `<head><meta charset="utf-8"><style>` +
+      `table{border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:12px;}` +
+      `td{border:1px solid #cbd5e1;padding:5px 9px;mso-number-format:"\\@";vertical-align:top;}` +
+      `</style></head><body><table>${h}</table></body></html>`;
+
+    const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `materiales_pedidos_${dd}-${mm}-${hoy.getFullYear()}.csv`;
+    a.download = `materiales_pedidos_${dd}-${mm}-${hoy.getFullYear()}.xls`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
