@@ -4067,10 +4067,13 @@
 
   async function resolverVac(id, estado) {
     const txt = estado === "Aceptada" ? "aceptar" : "rechazar";
-    if (!confirm(`¿Seguro que querés ${txt} esta solicitud de vacaciones?`)) return;
+    const rec = (adminVacacionesCache || []).find(r => r.id === id);
+    // Mensaje real según el tipo de la solicitud (no siempre es "vacaciones").
+    const tipo  = (rec && rec.tipo) ? rec.tipo : "Vacaciones";
+    const quien = rec ? ` de ${rec.empleado} (${rec.desde} → ${rec.hasta})` : "";
+    if (!confirm(`¿Seguro que querés ${txt} esta solicitud de ${tipo.toLowerCase()}${quien}?`)) return;
     // Optimista: cambio el estado local y re-pinto ya (al aceptar aparecen los
     // selectores de suplente sin esperar la recarga).
-    const rec = (adminVacacionesCache || []).find(r => r.id === id);
     const prev = rec ? rec.estado : null;
     if (rec) { rec.estado = estado; renderLicencias(); swrSet("adminLicencias", { snap: { v: adminVacacionesCache, c: adminCoberturasCache, pm: adminPermisosCache } }); }
     const j = await fetchJson({ action: "resolverVacaciones", admin: currentUser, hash: currentHash, id, estado });
