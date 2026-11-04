@@ -1169,6 +1169,38 @@ function coberturaActiva(suplente, servicio, fecha) {
   return null;
 }
 
+// Fechas EXACTAS (>= hoy) en que un suplente debe cubrir un servicio durante el
+// período de una licencia: los días del rango [desde, hasta] cuyo weekday está en
+// el HORARIOS del titular, con su hora inicio/fin. Las fechas que YA pasaron se
+// omiten → la suplencia "se borra" sola de la vista del empleado una vez cumplida.
+// Devuelve [{ fecha:"dd/MM/yyyy", dow, inicio, fin }] (vacío si no queda ninguna).
+function fechasCoberturaPendientes(titular, servicio, desdeDMY, hastaDMY, hoyInt) {
+  const horario = (HORARIOS[titular] || {})[servicio];
+  if (!horario) return [];
+  const a = fechaADate(desdeDMY), b = fechaADate(hastaDMY);
+  if (!a || !b) return [];
+  const tz = Session.getScriptTimeZone();
+  const out = [];
+  const d = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const end = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  let guard = 0;
+  while (d <= end && guard < 400) {
+    const slot = horario[d.getDay()];
+    if (slot) {
+      const fInt = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+      if (isNaN(hoyInt) || fInt >= hoyInt) {
+        out.push({
+          fecha: Utilities.formatDate(d, tz, "dd/MM/yyyy"),
+          dow: d.getDay(), inicio: slot[0], fin: slot[1]
+        });
+      }
+    }
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  return out;
+}
+
 // Empleado cuyo HORARIO usar para validar la fichada: el propio si el servicio
 // es suyo; si lo está cubriendo (vacaciones de otro), el del titular.
 function empleadoHorarioEfectivo(empleado, servicio, fecha) {
@@ -2767,6 +2799,35 @@ function doGet(e) {
         const d = fechaAInt(r[5]), h = fechaAInt(r[6]);
         return !isNaN(d) && !isNaN(h) && !isNaN(hoy) && hoy >= d && hoy <= h;
       }).map(r => ({ servicio: r[2], titular: r[3], desde: r[5], hasta: r[6] }));
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado ve las suplencias que tiene asignadas (aviso con fecha
+  // exacta). A diferencia de misCoberturas (solo la vigente hoy, para fichar),
+  // ésta muestra TODAS las que todavía tienen algún día por cubrir (apenas se
+  // asignan, aunque sean futuras). Cada día ya pasado se cae solo; cuando no
+  // queda ninguno, la suplencia desaparece de la lista. ----
+  if (p.action === "misSuplencias" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const cs = getCoberturasSheet();
+      if (cs.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = cs.getRange(2, 1, cs.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
+      const hoyInt = fechaAInt(p.fecha ||
+        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy"));
+      const records = [];
+      data.forEach(r => {
+        if ((r[4] || "").toString() !== p.empleado) return;
+        const servicio = (r[2] || "").toString();
+        const titular  = (r[3] || "").toString();
+        const fechas = fechasCoberturaPendientes(titular, servicio, r[5], r[6], hoyInt);
+        if (fechas.length) records.push({ servicio, titular, desde: r[5], hasta: r[6], fechas });
+      });
       return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
