@@ -20,6 +20,27 @@
         navigator.serviceWorker.register("sw.js").catch(function () {});
       });
     }
+    // Auto-actualización para la app instalada (dock): como la ventana queda
+    // abierta y no hay F5 a mano, chequeamos el ETag del index.html (cambia en
+    // cada deploy). Si hay versión nueva, recargamos al volver a la app.
+    (function () {
+      var versionActual = null;
+      function traerEtag() {
+        return fetch("./", { method: "HEAD", cache: "no-store" })
+          .then(function (r) { return r.ok ? r.headers.get("etag") : null; })
+          .catch(function () { return null; });
+      }
+      traerEtag().then(function (e) { versionActual = e; });
+      function chequearActualizacion() {
+        if (document.visibilityState !== "visible") return;
+        traerEtag().then(function (e) {
+          if (e && versionActual && e !== versionActual) location.reload();
+        });
+      }
+      document.addEventListener("visibilitychange", chequearActualizacion);
+      window.addEventListener("focus", chequearActualizacion);
+      setInterval(chequearActualizacion, 5 * 60 * 1000); // red de seguridad
+    })();
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
