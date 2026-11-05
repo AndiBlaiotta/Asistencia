@@ -113,6 +113,28 @@
     input[type="date"], input[type="time"] { min-width: 0; }
     input:focus, select:focus { border-color: var(--cyan); background: white; box-shadow: 0 0 0 3px rgba(26,143,190,0.15); }
 
+    /* Finales de obra: fila fecha/desde/hasta + chips de empleados */
+    .fo-row { display: flex; gap: 10px; }
+    .fo-row > div { flex: 1; min-width: 0; }
+    #fo-empleados {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 8px; margin: 8px 0 14px;
+    }
+    .fo-chip {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--black);
+      text-transform: none; letter-spacing: normal;
+      margin: 0; padding: 9px 12px; cursor: pointer; user-select: none;
+      background: #F4FAFC; border: 1.5px solid var(--border); border-radius: 12px;
+      line-height: 1.2;
+    }
+    .fo-chip.on { border-color: var(--cyan); background: #E6F4FA; }
+    .fo-chip input[type="checkbox"] {
+      width: 18px; height: 18px; min-width: 18px; flex: 0 0 auto;
+      margin: 0; padding: 0; accent-color: var(--cyan); cursor: pointer;
+    }
+
     /* Barra de filtros reutilizable (empleado + período) en vistas de admin */
     .filtro-bar {
       background: #F4FAFC;
@@ -884,26 +906,24 @@
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
     <div class="section-title" style="margin-top:16px;">🏗️ Programar un Final de obra</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:10px;">Cargá fecha, horario y dirección, y elegí a los empleados. Lo van a ver apenas lo guardes; el día del evento les aparece listo para fichar.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-      <div style="flex:1;min-width:140px;">
-        <label style="font-size:12px;font-weight:700;color:var(--gray);">Fecha</label>
-        <input type="date" id="fo-fecha" style="width:100%;">
+    <label>Fecha</label>
+    <input type="date" id="fo-fecha">
+    <div class="fo-row">
+      <div>
+        <label>Desde</label>
+        <input type="time" id="fo-inicio">
       </div>
-      <div style="min-width:90px;">
-        <label style="font-size:12px;font-weight:700;color:var(--gray);">Desde</label>
-        <input type="time" id="fo-inicio" style="width:100%;">
-      </div>
-      <div style="min-width:90px;">
-        <label style="font-size:12px;font-weight:700;color:var(--gray);">Hasta</label>
-        <input type="time" id="fo-fin" style="width:100%;">
+      <div>
+        <label>Hasta</label>
+        <input type="time" id="fo-fin">
       </div>
     </div>
-    <label style="font-size:12px;font-weight:700;color:var(--gray);">Dirección</label>
-    <input type="text" id="fo-dir" placeholder="Calle 123, Localidad" style="width:100%;margin-bottom:8px;">
-    <label style="font-size:12px;font-weight:700;color:var(--gray);">Nota (opcional)</label>
-    <input type="text" id="fo-nota" placeholder="Ej: llevar hidrolavadora" style="width:100%;margin-bottom:8px;">
-    <label style="font-size:12px;font-weight:700;color:var(--gray);">Empleados asignados</label>
-    <div id="fo-empleados" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;"></div>
+    <label>Dirección</label>
+    <input type="text" id="fo-dir" placeholder="Calle 123, Localidad">
+    <label>Nota (opcional)</label>
+    <input type="text" id="fo-nota" placeholder="Ej: llevar hidrolavadora">
+    <label>Empleados asignados</label>
+    <div id="fo-empleados"></div>
     <button class="btn btn-primary" onclick="crearFinalObra()">🏗️ Programar Final de obra</button>
     <div id="fo-msg" style="margin-top:6px;font-size:13px;"></div>
     <div class="section-title" style="margin-top:22px;">Finales de obra cargados</div>
@@ -5032,8 +5052,10 @@
     const cont = document.getElementById("fo-empleados");
     const emps = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
     cont.innerHTML = emps.map(e => `
-      <label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;padding:4px 10px;cursor:pointer;">
-        <input type="checkbox" class="fo-emp-chk" value="${e}"> ${e}
+      <label class="fo-chip">
+        <input type="checkbox" class="fo-emp-chk" value="${e}"
+               onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
+        <span>${e}</span>
       </label>`).join("");
   }
 
@@ -5058,7 +5080,9 @@
       });
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
       msg.className = "success"; msg.textContent = "✅ Final de obra programado.";
-      document.querySelectorAll(".fo-emp-chk:checked").forEach(c => c.checked = false);
+      document.querySelectorAll(".fo-emp-chk:checked").forEach(c => {
+        c.checked = false; c.closest(".fo-chip").classList.remove("on");
+      });
       document.getElementById("fo-dir").value = "";  document.getElementById("fo-nota").value = "";
       document.getElementById("fo-inicio").value = ""; document.getElementById("fo-fin").value = "";
       adminFinalesCache = null;
