@@ -2910,6 +2910,43 @@ function doGet(e) {
     }
   }
 
+  // ---- ADMIN: editar un Final de obra ya cargado (misma fila, mismo id) ----
+  if (p.action === "adminEditarFinalObra" && p.id && p.fecha && p.direccion && p.empleados) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      if (isNaN(fechaAInt(p.fecha))) return jsonOut({ status: "error", message: "Fecha inválida" });
+      const inicio = (p.inicio || "").toString().trim();
+      const fin    = (p.fin || "").toString().trim();
+      const reHora = /^\d{1,2}:\d{2}$/;
+      if (!reHora.test(inicio) || !reHora.test(fin)) {
+        return jsonOut({ status: "error", message: "Horario inválido (usá HH:MM)" });
+      }
+      const direccion = (p.direccion || "").toString().trim();
+      if (!direccion) return jsonOut({ status: "error", message: "Falta la dirección" });
+      const empleados = (p.empleados || "").toString().split("|").map(s => s.trim()).filter(Boolean);
+      if (!empleados.length) return jsonOut({ status: "error", message: "Elegí al menos un empleado" });
+      for (let i = 0; i < empleados.length; i++) {
+        if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
+      }
+      const fs = getFinalesSheet();
+      const last = fs.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay finales de obra" });
+      const ids = fs.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "No encontrado" });
+      // Sobrescribe fecha/inicio/fin/direccion/empleados/nota (cols 2–7);
+      // conserva el id (col 1) y la fecha de creación (col 8).
+      fs.getRange(idx + 2, 2, 1, 6).setNumberFormat("@")
+        .setValues([[p.fecha, inicio, fin, direccion, empleados.join(" | "),
+                     (p.nota || "").toString().trim()]]);
+      return jsonOut({ status: "ok", id: p.id });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
   // ---- ADMIN: eliminar un Final de obra ----
   if (p.action === "adminEliminarFinalObra" && p.id) {
     if (!checkAdmin(p.admin, p.hash)) {
