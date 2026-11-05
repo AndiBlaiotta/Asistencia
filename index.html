@@ -568,6 +568,8 @@
     <div id="section-servicios">
       <!-- Aviso de suplencias asignadas (coberturas futuras/vigentes con fecha) -->
       <div id="suplencias-aviso" style="display:none;"></div>
+      <!-- Aviso de Finales de obra programados (eventos asignados por el admin) -->
+      <div id="finales-aviso" style="display:none;"></div>
       <div class="section-title">¿En qué servicio estás?</div>
       <div id="service-list"></div>
     </div>
@@ -767,7 +769,10 @@
     </div>
 
     <!-- Horas asignadas (directo) -->
-    <button class="btn btn-primary admin-main-btn" onclick="openAdminHorasAsignadas()" style="margin-bottom:18px;">🕐 Horas asignadas</button>
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminHorasAsignadas()" style="margin-bottom:8px;">🕐 Horas asignadas</button>
+
+    <!-- Finales de obra (directo) -->
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminFinales()" style="margin-bottom:18px;">🏗️ Finales de obra</button>
 
     <!-- Vista previa: ver la app tal como la ve un empleado (modo prueba) -->
     <div class="section-title">👁️ Ver la app como un empleado</div>
@@ -872,6 +877,38 @@
     <div class="section-title" style="margin-top:16px;">Horas asignadas por empleado</div>
     <button class="btn-refresh" onclick="loadAdminHorasAsignadas()">🔄 Actualizar</button>
     <div id="admin-horas-asignadas"></div>
+  </div>
+
+  <!-- FINALES DE OBRA: programar un evento (fecha/hora/dirección) y asignarlo a empleados -->
+  <div id="admin-step-finales" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">🏗️ Programar un Final de obra</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px;">Cargá fecha, horario y dirección, y elegí a los empleados. Lo van a ver apenas lo guardes; el día del evento les aparece listo para fichar.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1;min-width:140px;">
+        <label style="font-size:12px;font-weight:700;color:var(--gray);">Fecha</label>
+        <input type="date" id="fo-fecha" style="width:100%;">
+      </div>
+      <div style="min-width:90px;">
+        <label style="font-size:12px;font-weight:700;color:var(--gray);">Desde</label>
+        <input type="time" id="fo-inicio" style="width:100%;">
+      </div>
+      <div style="min-width:90px;">
+        <label style="font-size:12px;font-weight:700;color:var(--gray);">Hasta</label>
+        <input type="time" id="fo-fin" style="width:100%;">
+      </div>
+    </div>
+    <label style="font-size:12px;font-weight:700;color:var(--gray);">Dirección</label>
+    <input type="text" id="fo-dir" placeholder="Calle 123, Localidad" style="width:100%;margin-bottom:8px;">
+    <label style="font-size:12px;font-weight:700;color:var(--gray);">Nota (opcional)</label>
+    <input type="text" id="fo-nota" placeholder="Ej: llevar hidrolavadora" style="width:100%;margin-bottom:8px;">
+    <label style="font-size:12px;font-weight:700;color:var(--gray);">Empleados asignados</label>
+    <div id="fo-empleados" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;"></div>
+    <button class="btn btn-primary" onclick="crearFinalObra()">🏗️ Programar Final de obra</button>
+    <div id="fo-msg" style="margin-top:6px;font-size:13px;"></div>
+    <div class="section-title" style="margin-top:22px;">Finales de obra cargados</div>
+    <button class="btn-refresh" onclick="loadAdminFinales()">🔄 Actualizar</button>
+    <div id="admin-finales-list"></div>
   </div>
 
   <!-- HORAS EXTRA: conteo por empleado y por mes -->
@@ -1240,7 +1277,8 @@
   // los suyos (ya vigentes) + Horas Extras/Suplencias + los que está cubriendo hoy.
   function serviciosRegistro() {
     return [...serviciosDe(currentUser).filter(servicioActivoHoy),
-            ...coberturasActivas.map(servicioCubiertoObj)];
+            ...coberturasActivas.map(servicioCubiertoObj),
+            ...finalesHoyCards()];
   }
 
   // Trae las coberturas activas de hoy y refresca la lista de servicios.
@@ -1295,6 +1333,61 @@
     }).join("");
     el.innerHTML = `<div class="section-title">🔁 Suplencias asignadas</div>${items}`;
     el.style.display = "block";
+  }
+
+  // Finales de obra programados por el admin para este empleado (de hoy en
+  // adelante). Se ven apenas se cargan; el día del evento además aparece una
+  // tarjeta para fichar con la dirección ya cargada (ver serviciosRegistro).
+  let misFinalesList = [];
+  async function cargarFinales() {
+    try {
+      const j = await fetchJson({
+        action: "misFinalesObra", empleado: currentUser, hash: currentHash,
+        fecha: fechaDMY(new Date())
+      });
+      misFinalesList = (j.status === "ok" && j.records) ? j.records : [];
+    } catch (e) {
+      misFinalesList = [];
+    }
+    renderFinalesAviso();
+    if (document.getElementById("screen-home").style.display !== "none" && !selectedService) {
+      renderServices();
+    }
+  }
+
+  function renderFinalesAviso() {
+    const el = document.getElementById("finales-aviso");
+    if (!el) return;
+    if (!misFinalesList.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+    const hoy = fechaDMY(new Date());
+    const items = misFinalesList.map(f => {
+      const dm = (f.fecha || "").split("/").slice(0, 2).join("/");  // dd/mm
+      const esHoy = f.fecha === hoy;
+      const comp = (f.companeros && f.companeros.length)
+        ? `<div style="color:#0a2540;font-size:12px;margin-top:2px;">👥 Con: ${f.companeros.join(", ")}</div>` : "";
+      const nota = f.nota
+        ? `<div style="color:#0a2540;font-size:12px;margin-top:2px;">📝 ${f.nota}</div>` : "";
+      return `<div style="padding:8px 10px;border-radius:10px;background:#fff4e6;border:1px solid #f3cf9a;margin-bottom:8px;">
+        <div style="font-weight:700;color:#0a2540;">🏗️ Final de obra${esHoy ? ` <span style="color:#c2410c;">· ¡HOY!</span>` : ""}</div>
+        <div style="color:#0a2540;font-size:13px;margin-top:2px;">📅 ${dm} · 🕒 ${f.inicio}–${f.fin}</div>
+        <div style="color:#0071A8;font-weight:700;font-size:13px;margin-top:2px;">📍 ${f.direccion}</div>
+        ${comp}${nota}
+      </div>`;
+    }).join("");
+    el.innerHTML = `<div class="section-title">🏗️ Finales de obra programados</div>${items}`;
+    el.style.display = "block";
+  }
+
+  // Tarjetas de Final de obra de HOY para fichar (dirección ya cargada). Se
+  // suman a la lista de servicios del día del evento. Es un servicio "libre"
+  // (servicio = "Final de obra"): sin validación de día/horario ni tardanza.
+  function finalesHoyCards() {
+    const hoy = fechaDMY(new Date());
+    return misFinalesList.filter(f => f.fecha === hoy).map(f => ({
+      nombre: "Final de obra", dir: f.direccion,
+      horario: { texto: `${f.inicio}–${f.fin}` },
+      evento: true, eventoId: f.id
+    }));
   }
 
   // ---------- AUSENCIAS (empleado) ----------
@@ -1548,6 +1641,7 @@
     renderServices();
     cargarCoberturas();
     cargarSuplencias();
+    cargarFinales();
     cargarAusencias();
     cargarPermisosHoy();
 
@@ -1697,6 +1791,7 @@
     adminEmpleado = adminServicio = null;
     coberturasActivas = [];
     misSuplenciasList = []; renderSuplenciasAviso();
+    misFinalesList = []; renderFinalesAviso();
     permisosHoy = [];
     misVacacionesSaldo = null;
     misAusencias = [];
@@ -1767,12 +1862,13 @@
     const list = document.getElementById("service-list");
 
     list.innerHTML = servicios.map((s, i) => `
-      <button class="service-card" onclick="selectService(${i})"${s.cobertura ? ' style="border-left-color:#0071A8;"' : ""}>
+      <button class="service-card" onclick="selectService(${i})"${s.cobertura ? ' style="border-left-color:#0071A8;"' : s.evento ? ' style="border-left-color:#ea580c;"' : ""}>
         <div>
-          <div class="s-nombre">${s.nombre}</div>
+          <div class="s-nombre">${s.evento ? "🏗️ " : ""}${s.nombre}</div>
           <div class="s-dir">${s.custom ? "✍️ Escribís la dirección al fichar" : s.dir}</div>
           ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
           ${s.cobertura ? `<div class="s-dir" style="color:#0071A8;font-weight:700;margin-top:2px;">🔁 Cubriendo a ${s.titular} · hasta ${s.hasta}</div>` : ""}
+          ${s.evento ? `<div class="s-dir" style="color:#ea580c;font-weight:700;margin-top:2px;">🏗️ Programado para hoy</div>` : ""}
         </div>
         <span class="s-arrow">›</span>
       </button>
@@ -2825,6 +2921,7 @@
     selectedService = null;
     coberturasActivas = []; permisosHoy = []; misAusencias = []; misHorasCache = null; ausenciasQueue = [];
     misSuplenciasList = []; renderSuplenciasAviso();
+    misFinalesList = []; renderFinalesAviso();
     document.getElementById("preview-emp-nombre").textContent = emp;
     const banner = document.getElementById("preview-banner");
     banner.style.display = "flex";
@@ -2891,6 +2988,7 @@
     document.getElementById("admin-step-serviciosdom").style.display = step === "serviciosdom" ? "block" : "none";
     document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
+    document.getElementById("admin-step-finales").style.display = step === "finales" ? "block" : "none";
     document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
     document.getElementById("admin-step-comprasserv").style.display = step === "comprasserv" ? "block" : "none";
     document.getElementById("admin-step-supervisiones").style.display = step === "supervisiones" ? "block" : "none";
@@ -4913,6 +5011,102 @@
         </div>
       </div>`;
     }).join("");
+  }
+
+  // ---------- FINALES DE OBRA (admin) ----------
+  let adminFinalesCache = null;
+
+  function openAdminFinales() {
+    adminShowStep("finales");
+    document.getElementById("fo-fecha").value  = new Date().toISOString().slice(0, 10);
+    document.getElementById("fo-inicio").value = "";
+    document.getElementById("fo-fin").value    = "";
+    document.getElementById("fo-dir").value    = "";
+    document.getElementById("fo-nota").value   = "";
+    document.getElementById("fo-msg").textContent = "";
+    renderFinalesEmpleadosChecks();
+    loadAdminFinales();
+  }
+
+  function renderFinalesEmpleadosChecks() {
+    const cont = document.getElementById("fo-empleados");
+    const emps = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
+    cont.innerHTML = emps.map(e => `
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;padding:4px 10px;cursor:pointer;">
+        <input type="checkbox" class="fo-emp-chk" value="${e}"> ${e}
+      </label>`).join("");
+  }
+
+  async function crearFinalObra() {
+    const msg = document.getElementById("fo-msg");
+    const fechaIso = document.getElementById("fo-fecha").value;
+    const inicio   = document.getElementById("fo-inicio").value;
+    const fin      = document.getElementById("fo-fin").value;
+    const dir      = document.getElementById("fo-dir").value.trim();
+    const nota     = document.getElementById("fo-nota").value.trim();
+    const empleados = Array.from(document.querySelectorAll(".fo-emp-chk:checked")).map(c => c.value);
+    if (!fechaIso)        { msg.className = "error"; msg.textContent = "Elegí la fecha."; return; }
+    if (!inicio || !fin)  { msg.className = "error"; msg.textContent = "Poné horario desde y hasta."; return; }
+    if (!dir)             { msg.className = "error"; msg.textContent = "Poné la dirección."; return; }
+    if (!empleados.length){ msg.className = "error"; msg.textContent = "Elegí al menos un empleado."; return; }
+    msg.className = "success"; msg.textContent = "Guardando...";
+    try {
+      const j = await fetchJson({
+        action: "adminCrearFinalObra", admin: currentUser, hash: currentHash,
+        fecha: isoToDMY(fechaIso), inicio, fin, direccion: dir, nota,
+        empleados: empleados.join("|")
+      });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
+      msg.className = "success"; msg.textContent = "✅ Final de obra programado.";
+      document.querySelectorAll(".fo-emp-chk:checked").forEach(c => c.checked = false);
+      document.getElementById("fo-dir").value = "";  document.getElementById("fo-nota").value = "";
+      document.getElementById("fo-inicio").value = ""; document.getElementById("fo-fin").value = "";
+      adminFinalesCache = null;
+      loadAdminFinales();
+    } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
+  }
+
+  async function loadAdminFinales() {
+    const el = document.getElementById("admin-finales-list");
+    el.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "adminFinalesObra", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      adminFinalesCache = j.records || [];
+      renderAdminFinales();
+    } catch (e) {
+      el.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+  }
+
+  function renderAdminFinales() {
+    const el = document.getElementById("admin-finales-list");
+    const recs = adminFinalesCache || [];
+    if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay finales de obra cargados.</div>`; return; }
+    const hoyInt = dmyToInt(fechaDMY(new Date()));
+    el.innerHTML = recs.map(r => {
+      const pasado = dmyToInt(r.fecha) < hoyInt;
+      return `
+      <div class="hist-day"${pasado ? ' style="opacity:.6;"' : ""}>
+        <div class="hist-day-label">🏗️ ${r.fecha} · ${r.inicio}–${r.fin}${pasado ? " · (pasado)" : ""}</div>
+        <div class="hist-row">
+          <div>
+            <div class="hr-serv">📍 ${r.direccion}</div>
+            <div class="hr-hora">👥 ${r.empleados.join(", ")}</div>
+            ${r.nota ? `<div class="hr-hora">📝 ${r.nota}</div>` : ""}
+          </div>
+          <button class="btn-mini btn-anular" onclick="eliminarFinalObra('${r.id}')">Eliminar</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  async function eliminarFinalObra(id) {
+    if (!confirm("¿Eliminar este Final de obra? Dejará de verlo el empleado.")) return;
+    const j = await fetchJson({ action: "adminEliminarFinalObra", admin: currentUser, hash: currentHash, id });
+    if (j.status !== "ok") { alert(j.message || "No se pudo eliminar."); return; }
+    adminFinalesCache = null;
+    loadAdminFinales();
   }
 
   // ---------- MATERIALES Y COMPRAS (admin, acceso único) ----------

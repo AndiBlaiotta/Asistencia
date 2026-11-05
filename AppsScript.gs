@@ -40,7 +40,7 @@ const HEADERS = [
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
                            "Vacaciones", "Coberturas", "Ausencias", "Permisos",
-                           "Tiempo Extra", "Supervisiones"];
+                           "Tiempo Extra", "Supervisiones", "Finales de obra"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -50,6 +50,12 @@ const VACAS_SHEET   = "Vacaciones";
 const VACAS_HEADERS = ["ID", "Empleado", "Desde", "Hasta", "Días", "Estado", "Solicitado", "Resuelto", "Tipo"];
 const COBERTURAS_SHEET   = "Coberturas";
 const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente", "Desde", "Hasta", "Asignado"];
+// "Finales de obra": eventos de Final de obra que programa el admin (fecha, hora,
+// dirección) y asigna a uno o varios empleados. El empleado los ve apenas se
+// cargan (anticipado) y el día del evento le aparece una tarjeta para fichar con
+// la dirección ya cargada. Empleados = lista separada por " | ".
+const FINALES_SHEET   = "Finales de obra";
+const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleados", "Nota", "Creado"];
 
 // Tipos de licencia (van todos a la hoja "Vacaciones", campo Tipo). Solo
 // "Vacaciones" consume días de cupo y tiene la regla de 7; el resto es por
@@ -1130,6 +1136,18 @@ function getCoberturasSheet() {
     sheet = ss.insertSheet(COBERTURAS_SHEET);
     sheet.appendRow(COBERTURAS_HEADERS);
     sheet.getRange(1, 1, 1, COBERTURAS_HEADERS.length)
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+function getFinalesSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(FINALES_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(FINALES_SHEET);
+    sheet.appendRow(FINALES_HEADERS);
+    sheet.getRange(1, 1, 1, FINALES_HEADERS.length)
       .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
     sheet.setFrozenRows(1);
   }
@@ -2828,6 +2846,114 @@ function doGet(e) {
         const fechas = fechasCoberturaPendientes(titular, servicio, r[5], r[6], hoyInt);
         if (fechas.length) records.push({ servicio, titular, desde: r[5], hasta: r[6], fechas });
       });
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ==========================================================
+  // FINALES DE OBRA (eventos programados por el admin)
+  // ==========================================================
+
+  // ---- ADMIN: crear un Final de obra programado ----
+  if (p.action === "adminCrearFinalObra" && p.fecha && p.direccion && p.empleados) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      if (isNaN(fechaAInt(p.fecha))) return jsonOut({ status: "error", message: "Fecha inválida" });
+      const inicio = (p.inicio || "").toString().trim();
+      const fin    = (p.fin || "").toString().trim();
+      const reHora = /^\d{1,2}:\d{2}$/;
+      if (!reHora.test(inicio) || !reHora.test(fin)) {
+        return jsonOut({ status: "error", message: "Horario inválido (usá HH:MM)" });
+      }
+      const direccion = (p.direccion || "").toString().trim();
+      if (!direccion) return jsonOut({ status: "error", message: "Falta la dirección" });
+      const empleados = (p.empleados || "").toString().split("|").map(s => s.trim()).filter(Boolean);
+      if (!empleados.length) return jsonOut({ status: "error", message: "Elegí al menos un empleado" });
+      for (let i = 0; i < empleados.length; i++) {
+        if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
+      }
+      const fs  = getFinalesSheet();
+      const id  = Utilities.getUuid().slice(0, 8);
+      const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      const row = fs.getLastRow() + 1;
+      fs.getRange(row, 1, 1, FINALES_HEADERS.length).setNumberFormat("@")
+        .setValues([[id, p.fecha, inicio, fin, direccion, empleados.join(" | "),
+                     (p.nota || "").toString().trim(), now]]);
+      return jsonOut({ status: "ok", id });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: listar los Finales de obra (más nuevo arriba) ----
+  if (p.action === "adminFinalesObra") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const fs = getFinalesSheet();
+      if (fs.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = fs.getRange(2, 1, fs.getLastRow() - 1, FINALES_HEADERS.length).getValues();
+      const records = data.map(r => ({
+        id: r[0], fecha: r[1], inicio: r[2], fin: r[3], direccion: r[4],
+        empleados: (r[5] || "").toString().split("|").map(s => s.trim()).filter(Boolean),
+        nota: r[6]
+      }));
+      records.sort((a, b) => fechaAInt(b.fecha) - fechaAInt(a.fecha));
+      return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: eliminar un Final de obra ----
+  if (p.action === "adminEliminarFinalObra" && p.id) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const fs = getFinalesSheet();
+      const last = fs.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay finales de obra" });
+      const ids = fs.getRange(2, 1, last - 1, 1).getValues().flat();
+      const idx = ids.findIndex(v => (v || "").toString() === p.id);
+      if (idx === -1) return jsonOut({ status: "error", message: "No encontrado" });
+      fs.deleteRow(idx + 2);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- El empleado ve los Finales de obra que tiene asignados (de hoy en
+  // adelante; los pasados se caen solos). El día del evento el front le muestra
+  // una tarjeta para fichar con la dirección ya cargada. ----
+  if (p.action === "misFinalesObra" && p.empleado) {
+    if (!checkAuth(p.empleado, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const fs = getFinalesSheet();
+      if (fs.getLastRow() <= 1) return jsonOut({ status: "ok", records: [] });
+      const data = fs.getRange(2, 1, fs.getLastRow() - 1, FINALES_HEADERS.length).getValues();
+      const hoyInt = fechaAInt(p.fecha ||
+        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy"));
+      const records = [];
+      data.forEach(r => {
+        const empleados = (r[5] || "").toString().split("|").map(s => s.trim()).filter(Boolean);
+        if (empleados.indexOf(p.empleado) === -1) return;
+        const fInt = fechaAInt(r[1]);
+        if (!isNaN(fInt) && !isNaN(hoyInt) && fInt < hoyInt) return; // ya pasó
+        records.push({
+          id: r[0], fecha: r[1], inicio: r[2], fin: r[3], direccion: r[4], nota: r[6],
+          companeros: empleados.filter(e => e !== p.empleado)
+        });
+      });
+      records.sort((a, b) => fechaAInt(a.fecha) - fechaAInt(b.fecha));
       return jsonOut({ status: "ok", records });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
