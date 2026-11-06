@@ -448,6 +448,27 @@ function esEmpleado(u)     { return EMPLEADOS.indexOf(u) !== -1; }
 function esAdminNombre(u)  { return ADMINS.indexOf(u) !== -1; }
 function esSupervisor(u)   { return SUPERVISORES.indexOf(u) !== -1; }
 
+// Normaliza un nombre para comparar: sin acentos, minúsculas, espacios colapsados.
+// Permite que el usuario escriba su nombre sin preocuparse por tildes/mayúsculas.
+function normalizarNombre(s) {
+  return (s || "").toString().trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+// Resuelve lo que el usuario escribió (nombre y apellido) al nombre CANÓNICO de
+// la config (el que usa la hoja Auth y las listas). Null si no matchea ninguno.
+// El login ya no usa una lista desplegable: el usuario tipea y el server deduce
+// quién es (y con eso, su categoría/rol).
+function resolverUsuario(typed) {
+  const n = normalizarNombre(typed);
+  if (!n) return null;
+  const todos = EMPLEADOS.concat(ADMINS).concat(SUPERVISORES);
+  for (let i = 0; i < todos.length; i++) {
+    if (normalizarNombre(todos[i]) === n) return todos[i];
+  }
+  return null;
+}
+
 // Usadas por los endpoints (post-login). Solo validan que la credencial
 // matchee; la caducidad se aplica en el login, no en cada request.
 function checkAuth(empleado, hash) {
@@ -1763,16 +1784,20 @@ function doGet(e) {
   // ---- LOGIN: solo valida credenciales, no escribe nada ----
   // Devuelve el rol para que el cliente sepa qué pantalla mostrar.
   if (p.action === "login") {
-    const usuario = p.empleado;
+    // El usuario escribe su nombre (ya no elige de una lista): lo resolvemos al
+    // nombre canónico y de ahí sale su categoría/rol. Devolvemos `usuario` para
+    // que el front use el nombre canónico en todas las llamadas siguientes.
+    const usuario = resolverUsuario(p.empleado);
     // Rol base para el ruteo del front: admin > empleado > supervisor "puro".
     // Alejandro es empleado Y supervisor: entra como "empleado" con supervisor:true.
-    const role = esAdminNombre(usuario) ? "admin"
+    const role = !usuario ? null
+               : esAdminNombre(usuario) ? "admin"
                : esEmpleado(usuario)    ? "empleado"
                : esSupervisor(usuario)  ? "supervisor" : null;
     if (role) {
       const res = verificarUsuario(usuario, p.hash);
       if (res.ok) {
-        return jsonOut({ status: "ok", role, supervisor: esSupervisor(usuario),
+        return jsonOut({ status: "ok", role, usuario, supervisor: esSupervisor(usuario),
                          mustChangePassword: !!res.mustChange });
       }
     }

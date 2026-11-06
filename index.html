@@ -469,6 +469,8 @@
       background: #FAFCFD; outline: none; resize: vertical;
     }
     .modal-box textarea:focus { border-color: var(--cyan); background: white; }
+    /* Modal con contenido largo (ej. solicitar limpieza): scrollea adentro. */
+    .modal-box.modal-scroll { max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
     /* ---- SCREENS ---- */
     #screen-login  { display: block; }
@@ -530,23 +532,11 @@
     <p class="tagline">Sistema de Asistencia · Fiorentino Blaiotta</p>
   </div>
 
-  <label for="inp-nombre">Usuarios</label>
-  <select id="inp-nombre">
-    <option value="">-- Seleccioná tu nombre --</option>
-    <option value="Maria Decimas">Maria Decimas</option>
-    <option value="Celeste Freire">Celeste Freire</option>
-    <option value="Rocio Medina">Rocio Medina</option>
-    <option value="Brisa Medina">Brisa Medina</option>
-    <option value="Sabrina Scarampo">Sabrina Scarampo</option>
-    <option value="Rebeca Ayala">Rebeca Ayala</option>
-    <option value="Alejandro Jelvez">Alejandro Jelvez</option>
-    <option value="Milagros Acuña">Milagros Acuña</option>
-    <option value="Iara Gimenez">Iara Gimenez</option>
-    <optgroup label="Administración">
-      <option value="Andrés Blaiotta">Andrés Blaiotta</option>
-      <option value="Martín Fiorentino">Martín Fiorentino</option>
-    </optgroup>
-  </select>
+  <label for="inp-nombre">Usuario</label>
+  <input type="text" id="inp-nombre" placeholder="Nombre y apellido"
+         autocomplete="username" autocapitalize="words" autocorrect="off"
+         spellcheck="false" onkeydown="if(event.key==='Enter')document.getElementById('inp-pass').focus()">
+  <div style="font-size:12px;color:var(--gray);margin-top:6px;">Escribí tu nombre y apellido (no hace falta respetar mayúsculas ni tildes).</div>
 
   <label for="inp-pass">Contraseña</label>
   <div class="pass-wrap">
@@ -1149,6 +1139,27 @@
   </div>
 </div>
 
+<!-- ==================== MODAL: SOLICITAR LIMPIEZA DE UN DEPTO ==================== -->
+<div id="modal-solicitud" class="modal-overlay" style="display:none;">
+  <div class="modal-box modal-scroll">
+    <div class="modal-title" style="color:var(--cyan);">🏢 Solicitar limpieza</div>
+    <div class="modal-sub" id="msol-sub"></div>
+    <label>Tareas que querés que hagamos</label>
+    <div id="msol-items"></div>
+    <label style="margin-top:8px;">Día</label>
+    <input type="date" id="msol-fecha">
+    <div class="fo-row">
+      <div><label>Desde</label><input type="time" id="msol-desde"></div>
+      <div><label>Hasta (opcional)</label><input type="time" id="msol-hasta"></div>
+    </div>
+    <label>Nota (opcional)</label>
+    <input type="text" id="msol-nota" placeholder="Ej: el huésped se va 11hs">
+    <button class="btn btn-primary" style="margin-top:14px;" onclick="enviarSolicitud()">Enviar solicitud</button>
+    <button class="btn btn-cambiar" onclick="cerrarSolicitudModal()">Cancelar</button>
+    <div id="msol-msg" style="margin-top:6px;font-size:13px;"></div>
+  </div>
+</div>
+
 <script>
   // ============================================================
   // ✏️  PEGÁ TU URL DEL APPS SCRIPT AQUÍ:
@@ -1734,7 +1745,7 @@
     const btnLogin = document.querySelector("#screen-login .btn-primary");
     errEl.textContent = "";
 
-    if (!nombre) { errEl.textContent = "Seleccioná tu nombre."; return; }
+    if (!nombre) { errEl.textContent = "Escribí tu usuario (nombre y apellido)."; return; }
     if (!pass)   { errEl.textContent = "Ingresá tu contraseña."; return; }
 
     btnLogin.disabled = true;
@@ -1749,18 +1760,22 @@
         return;
       }
 
+      // El server resuelve el nombre canónico (sin depender de tildes/mayúsculas);
+      // de acá en más se usa ese, no lo que se tipeó.
+      const user = json.usuario || nombre;
+
       // La contraseña venció o es la de arranque: obligar a cambiarla.
       if (json.mustChangePassword) {
         startCambioPassword({
-          user: nombre, hash, role: json.role, forced: true,
+          user, hash, role: json.role, forced: true,
           motivo: "Por seguridad tenés que elegir una contraseña nueva para continuar."
         });
         return;
       }
 
-      saveSession(nombre, hash, json.role);
-      if (json.role === "admin") enterAdmin(nombre, hash);
-      else                       enterApp(nombre, hash);
+      saveSession(user, hash, json.role);
+      if (json.role === "admin") enterAdmin(user, hash);
+      else                       enterApp(user, hash);
     } catch (e) {
       errEl.textContent = "❌ No se pudo verificar: " + e.message;
     } finally {
@@ -5242,33 +5257,6 @@
     }
   }
 
-  // Formulario (colapsado) para solicitar la limpieza de un depto libre.
-  function clienteFormHtml(ei, depto) {
-    const f = `sf-${ei}-${depto}`;
-    const hoy = new Date().toISOString().slice(0, 10);
-    const items = (clienteData.items || []).map(it => `
-      <label class="fo-chip" style="align-items:flex-start;">
-        <input type="checkbox" class="${f}-chk" value="${it.clave}"
-               onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
-        <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
-      </label>`).join("");
-    return `
-      <div id="${f}-box" style="display:none;padding:10px;border:1px solid var(--cyan-mid);border-radius:10px;margin:8px 0;">
-        <label>Tareas que querés que hagamos</label>
-        <div id="${f}-items">${items}</div>
-        <label style="margin-top:8px;">Día</label>
-        <input type="date" id="${f}-fecha" value="${hoy}">
-        <div class="fo-row">
-          <div><label>Desde</label><input type="time" id="${f}-desde"></div>
-          <div><label>Hasta (opcional)</label><input type="time" id="${f}-hasta"></div>
-        </div>
-        <label>Nota (opcional)</label>
-        <input type="text" id="${f}-nota" placeholder="Ej: el huésped se va 11hs">
-        <button class="btn btn-primary" onclick="enviarSolicitud(${ei}, '${depto}')">Enviar solicitud</button>
-        <div id="${f}-msg" style="margin-top:6px;font-size:13px;"></div>
-      </div>`;
-  }
-
   function renderClienteDeptos() {
     const cont = document.getElementById("cliente-deptos");
     const eds = (clienteData && clienteData.edificios) || [];
@@ -5295,28 +5283,46 @@
         return `
           <div class="hist-row">
             <div><div class="hr-serv">🏠 Depto ${d.depto} · <span style="color:var(--gray);">Libre</span></div></div>
-            <button class="btn-mini btn-cambiar" style="margin:0;" onclick="toggleSolForm('sf-${ei}-${d.depto}-box')">➕ Solicitar</button>
-          </div>
-          ${clienteFormHtml(ei, d.depto)}`;
+            <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openSolicitudModal(${ei}, '${d.depto}')">➕ Solicitar</button>
+          </div>`;
       }).join("");
       return `<div class="hist-day"><div class="hist-day-label">🏢 ${e.nombre}</div>${deptos}</div>`;
     }).join("");
   }
 
-  function toggleSolForm(id) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+  // Abre el modal de solicitud para un depto, con la checklist y el día de hoy.
+  let solModal = null; // { ei, depto }
+  function openSolicitudModal(ei, depto) {
+    solModal = { ei, depto };
+    const edificio = clienteData.edificios[ei].nombre;
+    document.getElementById("msol-sub").textContent = `Depto ${depto} · ${edificio}`;
+    document.getElementById("msol-items").innerHTML = (clienteData.items || []).map(it => `
+      <label class="fo-chip" style="align-items:flex-start;">
+        <input type="checkbox" class="msol-chk" value="${it.clave}"
+               onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
+        <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
+      </label>`).join("");
+    document.getElementById("msol-fecha").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("msol-desde").value = "";
+    document.getElementById("msol-hasta").value = "";
+    document.getElementById("msol-nota").value  = "";
+    document.getElementById("msol-msg").textContent = "";
+    document.getElementById("modal-solicitud").style.display = "flex";
+  }
+  function cerrarSolicitudModal() {
+    document.getElementById("modal-solicitud").style.display = "none";
+    solModal = null;
   }
 
-  async function enviarSolicitud(ei, depto) {
-    const f = `sf-${ei}-${depto}`;
-    const msg = document.getElementById(`${f}-msg`);
-    const edificio = clienteData.edificios[ei].nombre;
-    const tareas = Array.from(document.querySelectorAll(`.${f}-chk:checked`)).map(c => c.value);
-    const fechaIso = document.getElementById(`${f}-fecha`).value;
-    const desde = document.getElementById(`${f}-desde`).value;
-    const hasta = document.getElementById(`${f}-hasta`).value;
-    const nota  = document.getElementById(`${f}-nota`).value.trim();
+  async function enviarSolicitud() {
+    if (!solModal) return;
+    const msg = document.getElementById("msol-msg");
+    const edificio = clienteData.edificios[solModal.ei].nombre;
+    const tareas = Array.from(document.querySelectorAll(".msol-chk:checked")).map(c => c.value);
+    const fechaIso = document.getElementById("msol-fecha").value;
+    const desde = document.getElementById("msol-desde").value;
+    const hasta = document.getElementById("msol-hasta").value;
+    const nota  = document.getElementById("msol-nota").value.trim();
     if (!tareas.length) { msg.className = "error"; msg.textContent = "Elegí al menos una tarea."; return; }
     if (!fechaIso)      { msg.className = "error"; msg.textContent = "Elegí el día."; return; }
     if (!desde)         { msg.className = "error"; msg.textContent = "Poné el horario (desde)."; return; }
@@ -5324,10 +5330,11 @@
     try {
       const j = await fetchJson({
         action: "solicitarLimpieza", admin: currentUser, hash: currentHash,
-        edificio, depto, fecha: isoToDMY(fechaIso), desde, hasta, nota,
+        edificio, depto: solModal.depto, fecha: isoToDMY(fechaIso), desde, hasta, nota,
         tareas: tareas.join("|")
       });
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
+      cerrarSolicitudModal();
       loadClienteDeptos();
     } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
   }
