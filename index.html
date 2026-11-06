@@ -1108,6 +1108,22 @@
   <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
 </div>
 
+<!-- ==================== PANTALLA: CLIENTE (deptos temporarios) ==================== -->
+<div id="screen-cliente" class="card" style="display:none;">
+  <div class="user-header">
+    <div class="nombre" id="cli-nombre"></div>
+    <div class="fecha">Departamentos temporarios</div>
+  </div>
+  <div class="section-title">🏢 Tus departamentos</div>
+  <div style="font-size:12px;color:var(--gray);margin-bottom:10px;">Pedí la limpieza de cada depto: elegí qué querés que hagamos, el día y el horario. Cuando lo tengamos hecho, el depto vuelve a quedar libre para una nueva solicitud.</div>
+  <button class="btn-refresh" onclick="loadClienteDeptos()">🔄 Actualizar</button>
+  <div id="cli-deptos"></div>
+  <div class="section-title" style="margin-top:22px;">✅ Limpiezas hechas</div>
+  <div id="cli-historial"></div>
+  <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
+  <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
+</div>
+
 <!-- ==================== MODAL: MOTIVO DE TARDANZA ==================== -->
 <div id="modal-motivo" class="modal-overlay" style="display:none;">
   <div class="modal-box">
@@ -1280,6 +1296,10 @@
   // empleado. La validación real está en el servidor (ADMINS_HASH); esta
   // lista solo sirve para restaurar la sesión guardada del lado del cliente.
   const ADMINS = ["Andrés Blaiotta", "Martín Fiorentino"];
+  // Clientes (espejo de CLIENTES en AppsScript.gs). Entran con su pantalla propia
+  // de deptos temporarios; no ven fichadas ni el resto de la app.
+  const CLIENTES = ["Milagros Salim"];
+  function esClienteFront(u) { return CLIENTES.indexOf(u) !== -1; }
 
   // Supervisores (espejo de SUPERVISORES en AppsScript.gs). Rol doble previsto:
   // empleado + supervisor; su pantalla muestra además la pestaña "🔍 Supervisión".
@@ -1711,7 +1731,8 @@
       // Validar que el empleado/admin siga existiendo en la config actual.
       if (s.empleado && s.hash) {
         if (s.role === "admin" && ADMINS.includes(s.empleado)) return s;
-        if (s.role !== "admin" && SERVICIOS[s.empleado])       return s;
+        if (s.role === "cliente" && esClienteFront(s.empleado)) return s;
+        if (s.role !== "admin" && s.role !== "cliente" && SERVICIOS[s.empleado]) return s;
       }
     } catch (e) {}
     return null;
@@ -1748,8 +1769,9 @@
   function restoreSession() {
     const s = loadSession();
     if (!s) return;
-    if (s.role === "admin") enterAdmin(s.empleado, s.hash);
-    else                    enterApp(s.empleado, s.hash);
+    if (s.role === "admin")        enterAdmin(s.empleado, s.hash);
+    else if (s.role === "cliente") enterCliente(s.empleado, s.hash);
+    else                           enterApp(s.empleado, s.hash);
   }
 
   // ---------- LOGIN ----------
@@ -1789,8 +1811,9 @@
       }
 
       saveSession(user, hash, json.role);
-      if (json.role === "admin") enterAdmin(user, hash);
-      else                       enterApp(user, hash);
+      if (json.role === "admin")        enterAdmin(user, hash);
+      else if (json.role === "cliente") enterCliente(user, hash);
+      else                              enterApp(user, hash);
     } catch (e) {
       errEl.textContent = "❌ No se pudo verificar: " + e.message;
     } finally {
@@ -1811,7 +1834,7 @@
     document.getElementById("pw-usuario").textContent = opts.user;
     // En el cambio obligatorio no se puede cancelar.
     document.getElementById("pw-cancelar").style.display = opts.forced ? "none" : "block";
-    ["screen-login", "screen-home", "screen-admin"].forEach(id =>
+    ["screen-login", "screen-home", "screen-admin", "screen-cliente"].forEach(id =>
       document.getElementById(id).style.display = "none");
     document.getElementById("screen-password").style.display = "block";
   }
@@ -1819,18 +1842,25 @@
   // Cambio voluntario desde adentro de la app.
   function pedirCambioPassword() {
     if (bloqueaPreview()) return;
-    const role = ADMINS.includes(currentUser) ? "admin" : "empleado";
+    const role = ADMINS.includes(currentUser) ? "admin"
+               : esClienteFront(currentUser) ? "cliente" : "empleado";
     startCambioPassword({
       user: currentUser, hash: currentHash, role, forced: false,
       motivo: "Elegí tu nueva contraseña."
     });
   }
 
+  // Devuelve el id de pantalla principal según el rol (para volver tras el cambio).
+  function pantallaDeRol(role) {
+    return role === "admin" ? "screen-admin"
+         : role === "cliente" ? "screen-cliente" : "screen-home";
+  }
+
   function cancelarCambioPassword() {
     const role = pwState && pwState.role;
     pwState = null;
     document.getElementById("screen-password").style.display = "none";
-    document.getElementById(role === "admin" ? "screen-admin" : "screen-home").style.display = "block";
+    document.getElementById(pantallaDeRol(role)).style.display = "block";
   }
 
   async function cambiarPassword() {
@@ -1866,8 +1896,9 @@
       saveSession(user, nuevoHash, role);
       pwState = null;
       document.getElementById("screen-password").style.display = "none";
-      if (role === "admin") enterAdmin(user, nuevoHash);
-      else                  enterApp(user, nuevoHash);
+      if (role === "admin")        enterAdmin(user, nuevoHash);
+      else if (role === "cliente") enterCliente(user, nuevoHash);
+      else                         enterApp(user, nuevoHash);
     } catch (e) {
       errEl.textContent = "❌ Error: " + e.message;
     } finally {
@@ -1896,6 +1927,7 @@
     adminRecordsCache = { empleado: null, records: null };
     document.getElementById("screen-home").style.display  = "none";
     document.getElementById("screen-admin").style.display = "none";
+    document.getElementById("screen-cliente").style.display = "none";
     document.getElementById("screen-login").style.display = "block";
     document.getElementById("inp-nombre").value = "";
     document.getElementById("inp-pass").value = "";
@@ -5250,15 +5282,35 @@
     loadAdminFinales();
   }
 
-  // ---------- CLIENTES / DEPTOS TEMPORARIOS (vista previa admin) ----------
-  // Ciclo por depto: LIBRE → (clienta) SOLICITADO (tareas + día/horario) →
-  // (nosotros) HECHO → vuelve a LIBRE. V1 todo desde la cuenta admin.
-  let clienteData = null; // { edificios:[{nombre,deptos:[{depto,pendiente}]}], items, hechas }
+  // ---------- CLIENTES / DEPTOS TEMPORARIOS ----------
+  // Ciclo por depto: LIBRE → (cliente) SOLICITADO (tareas + día/horario) →
+  // (nosotros) HECHO → vuelve a LIBRE. La MISMA UI sirve para el admin (que ve
+  // todos los edificios y puede "Marcar hecho") y para el cliente (solo sus
+  // edificios, sin ese botón). `clienteCtx` dice en qué contenedores pintar y en
+  // qué modo.
+  let clienteData = null; // { edificios, items, hechas, esCliente }
+  let clienteCtx = { deptos: "cliente-deptos", hist: "cliente-historial", modo: "admin" };
 
-  function openAdminClientes() { adminShowStep("clientes"); loadClienteDeptos(); }
+  // El cliente entra a su pantalla propia (solo deptos).
+  function enterCliente(nombre, hash) {
+    currentUser = nombre;
+    currentHash = hash;
+    document.getElementById("inp-pass").value = "";
+    document.getElementById("cli-nombre").textContent = nombre;
+    document.getElementById("screen-login").style.display   = "none";
+    document.getElementById("screen-cliente").style.display = "block";
+    clienteCtx = { deptos: "cli-deptos", hist: "cli-historial", modo: "cliente" };
+    loadClienteDeptos();
+  }
+
+  function openAdminClientes() {
+    adminShowStep("clientes");
+    clienteCtx = { deptos: "cliente-deptos", hist: "cliente-historial", modo: "admin" };
+    loadClienteDeptos();
+  }
 
   async function loadClienteDeptos() {
-    const cont = document.getElementById("cliente-deptos");
+    const cont = document.getElementById(clienteCtx.deptos);
     cont.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
       const j = await fetchJson({ action: "deptosClienteEstado", admin: currentUser, hash: currentHash });
@@ -5268,12 +5320,13 @@
       renderClienteHistorial();
     } catch (e) {
       cont.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
-      document.getElementById("cliente-historial").innerHTML = "";
+      document.getElementById(clienteCtx.hist).innerHTML = "";
     }
   }
 
   function renderClienteDeptos() {
-    const cont = document.getElementById("cliente-deptos");
+    const cont = document.getElementById(clienteCtx.deptos);
+    const esAdminModo = clienteCtx.modo === "admin";
     const eds = (clienteData && clienteData.edificios) || [];
     if (!eds.length) { cont.innerHTML = `<div class="hist-empty">Sin edificios configurados.</div>`; return; }
     cont.innerHTML = eds.map((e, ei) => {
@@ -5290,7 +5343,7 @@
                 ${s.nota ? `<div class="hr-hora">📝 ${s.nota}</div>` : ""}
               </div>
               <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
-                <button class="btn-mini" style="background:#0a7d5a;color:#fff;border:none;margin:0;" onclick="marcarLimpiezaHecha('${s.id}')">✅ Hecho</button>
+                ${esAdminModo ? `<button class="btn-mini" style="background:#0a7d5a;color:#fff;border:none;margin:0;" onclick="marcarLimpiezaHecha('${s.id}')">✅ Hecho</button>` : ""}
                 <button class="btn-mini btn-anular" onclick="cancelarLimpieza('${s.id}')">✖ Cancelar</button>
               </div>
             </div>`;
@@ -5411,7 +5464,7 @@
   }
 
   function renderClienteHistorial() {
-    const el = document.getElementById("cliente-historial");
+    const el = document.getElementById(clienteCtx.hist);
     const hechas = (clienteData && clienteData.hechas) || [];
     if (!hechas.length) { el.innerHTML = `<div class="hist-empty">Todavía no hay limpiezas hechas.</div>`; return; }
     el.innerHTML = hechas.map(s => {

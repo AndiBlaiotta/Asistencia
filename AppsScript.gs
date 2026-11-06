@@ -65,8 +65,11 @@ const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleado
 // la próxima solicitud (mismo criterio de 3 estados que los materiales). Config
 // hardcodeada, como SERVICIOS/PRODUCTOS. V1 (2026-11-06): la vista de la clienta
 // se prueba desde la cuenta admin; el login real de la clienta viene después.
+// Clientes (rol propio, login por nombre). Cada edificio pertenece a un cliente
+// (campo `cliente`). El cliente entra y ve SOLO sus edificios/deptos.
+const CLIENTES = ["Milagros Salim"];
 const CLIENTE_EDIFICIOS = [
-  { nombre: "Ravignani 2314, Palermo",
+  { cliente: "Milagros Salim", nombre: "Ravignani 2314, Palermo",
     deptos: ["101", "102", "201", "202", "401", "402", "501", "502", "701"] }
 ];
 // Ítems de la checklist = el pedido de la clienta (qué quiere que hagamos).
@@ -308,7 +311,11 @@ const LEGACY_HASH = {
   "Milagros Acuña":    "092af857f5f8db337c4b44375ea6672c1e80399fe86dda8708d5f58d16ce03f3",
   // Iara Gimenez (comodín): contraseña inicial "iara123" (la cambia en su primer
   // login: el fallback de LEGACY_HASH la marca con "cambio obligatorio").
-  "Iara Gimenez":      "38ca87413835fbf3122c4b48b30368bfa0792c08cef9f95405726b7588274674"
+  "Iara Gimenez":      "38ca87413835fbf3122c4b48b30368bfa0792c08cef9f95405726b7588274674",
+  // Milagros Salim (CLIENTE): contraseña provisoria "salim2026". La cambia sí o sí
+  // en su primer login (el fallback la marca con "cambio obligatorio"). Es de un
+  // solo uso: al cambiarla queda en la hoja Auth y este hash deja de usarse.
+  "Milagros Salim":    "788ed3912552b40d766cbfa52a32953b6ef481985c70d3c968b69a85a87aee23"
 };
 
 function jsonOut(obj) {
@@ -447,6 +454,14 @@ function verificarUsuario(usuario, clientHash) {
 function esEmpleado(u)     { return EMPLEADOS.indexOf(u) !== -1; }
 function esAdminNombre(u)  { return ADMINS.indexOf(u) !== -1; }
 function esSupervisor(u)   { return SUPERVISORES.indexOf(u) !== -1; }
+function esCliente(u)      { return CLIENTES.indexOf(u) !== -1; }
+// Edificios que ve un cliente (los suyos). Admin ve todos.
+function edificiosDeCliente(nombre) {
+  return CLIENTE_EDIFICIOS.filter(function (e) { return e.cliente === nombre; });
+}
+function checkCliente(usuario, hash) {
+  return esCliente(usuario) && verificarUsuario(usuario, hash).ok;
+}
 
 // Normaliza un nombre para comparar: sin acentos, minúsculas, espacios colapsados.
 // Permite que el usuario escriba su nombre sin preocuparse por tildes/mayúsculas.
@@ -462,7 +477,7 @@ function normalizarNombre(s) {
 function resolverUsuario(typed) {
   const n = normalizarNombre(typed);
   if (!n) return null;
-  const todos = EMPLEADOS.concat(ADMINS).concat(SUPERVISORES);
+  const todos = EMPLEADOS.concat(ADMINS).concat(SUPERVISORES).concat(CLIENTES);
   for (let i = 0; i < todos.length; i++) {
     if (normalizarNombre(todos[i]) === n) return todos[i];
   }
@@ -1793,7 +1808,8 @@ function doGet(e) {
     const role = !usuario ? null
                : esAdminNombre(usuario) ? "admin"
                : esEmpleado(usuario)    ? "empleado"
-               : esSupervisor(usuario)  ? "supervisor" : null;
+               : esSupervisor(usuario)  ? "supervisor"
+               : esCliente(usuario)     ? "cliente" : null;
     if (role) {
       const res = verificarUsuario(usuario, p.hash);
       if (res.ok) {
@@ -1809,7 +1825,7 @@ function doGet(e) {
   // actual, se guarda el nuevo (HMAC) y se resetea la fecha de caducidad.
   if (p.action === "cambiarPassword" && p.empleado && p.hash && p.nuevoHash) {
     const usuario = p.empleado;
-    if (!esEmpleado(usuario) && !esAdminNombre(usuario) && !esSupervisor(usuario)) {
+    if (!esEmpleado(usuario) && !esAdminNombre(usuario) && !esSupervisor(usuario) && !esCliente(usuario)) {
       return jsonOut({ status: "error", message: "Usuario inválido" });
     }
     if (!verificarUsuario(usuario, p.hash).ok) {
@@ -3087,10 +3103,16 @@ function doGet(e) {
   // ---- Estado de todos los deptos del cliente: config (edificios + checklist)
   // + la solicitud PENDIENTE de cada depto (si la hay) + historial de HECHAS. ----
   if (p.action === "deptosClienteEstado") {
-    if (!checkAdmin(p.admin, p.hash)) {
+    // Admin ve todos los edificios; un cliente ve SOLO los suyos.
+    const esAdm = checkAdmin(p.admin, p.hash);
+    const esCli = !esAdm && checkCliente(p.admin, p.hash);
+    if (!esAdm && !esCli) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
+      const visibles = esAdm ? CLIENTE_EDIFICIOS : edificiosDeCliente(p.admin);
+      const nombresVisibles = {};
+      visibles.forEach(function (e) { nombresVisibles[e.nombre] = true; });
       const sheet = getSolicitudesSheet();
       const pend = {};        // "edificio||depto" -> solicitud pendiente
       const hechas = [];      // historial (más nuevo arriba)
@@ -3103,12 +3125,13 @@ function doGet(e) {
             tareas: (r[7] || "").toString().split("|").map(function (s) { return s.trim(); }).filter(Boolean),
             nota: r[8], creado: r[9], hechoPor: r[10], fechaHecho: r[11], fila: i + 2
           };
+          if (!nombresVisibles[sol.edificio]) return; // fuera del alcance del que consulta
           if (sol.estado === "Pendiente") pend[sol.edificio + "||" + sol.depto] = sol;
           else if (sol.estado === "Hecho") hechas.push(sol);
         });
       }
       hechas.sort(function (a, b) { return (b.fila) - (a.fila); });
-      const edificios = CLIENTE_EDIFICIOS.map(function (e) {
+      const edificios = visibles.map(function (e) {
         return {
           nombre: e.nombre,
           deptos: e.deptos.map(function (d) {
@@ -3116,7 +3139,8 @@ function doGet(e) {
           })
         };
       });
-      return jsonOut({ status: "ok", edificios: edificios, items: CHECKLIST_DEPTO, hechas: hechas });
+      return jsonOut({ status: "ok", edificios: edificios, items: CHECKLIST_DEPTO,
+                       hechas: hechas, esCliente: esCli });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -3124,12 +3148,18 @@ function doGet(e) {
 
   // ---- La clienta (hoy simulada por el admin) solicita una limpieza de un depto. ----
   if (p.action === "solicitarLimpieza" && p.edificio && p.depto && p.fecha && p.tareas) {
-    if (!checkAdmin(p.admin, p.hash)) {
+    const esAdm = checkAdmin(p.admin, p.hash);
+    const esCli = !esAdm && checkCliente(p.admin, p.hash);
+    if (!esAdm && !esCli) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
       if (!edificioConDepto(p.edificio, p.depto)) {
         return jsonOut({ status: "error", message: "Edificio o depto inválido" });
+      }
+      // Un cliente solo puede pedir en SUS edificios.
+      if (esCli && !edificiosDeCliente(p.admin).some(function (e) { return e.nombre === p.edificio; })) {
+        return jsonOut({ status: "error", message: "No autorizado" });
       }
       if (isNaN(fechaAInt(p.fecha))) return jsonOut({ status: "error", message: "Fecha inválida" });
       const desde = (p.desde || "").toString().trim();
@@ -3165,18 +3195,28 @@ function doGet(e) {
 
   // ---- Cancelar una solicitud PENDIENTE (borra la fila). ----
   if (p.action === "cancelarLimpieza" && p.id) {
-    if (!checkAdmin(p.admin, p.hash)) {
+    const esAdm = checkAdmin(p.admin, p.hash);
+    const esCli = !esAdm && checkCliente(p.admin, p.hash);
+    if (!esAdm && !esCli) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
       const sheet = getSolicitudesSheet();
       const last = sheet.getLastRow();
       if (last <= 1) return jsonOut({ status: "error", message: "No hay solicitudes" });
+      // cols: ID(1), Edificio(2), ..., Estado(4)
       const data = sheet.getRange(2, 1, last - 1, 4).getValues();
       const idx = data.findIndex(function (r) {
         return (r[0] || "").toString() === p.id && (r[3] || "").toString() === "Pendiente";
       });
       if (idx === -1) return jsonOut({ status: "error", message: "No encontrada o ya resuelta" });
+      // Un cliente solo puede cancelar solicitudes de SUS edificios.
+      if (esCli) {
+        const edif = (data[idx][1] || "").toString();
+        if (!edificiosDeCliente(p.admin).some(function (e) { return e.nombre === edif; })) {
+          return jsonOut({ status: "error", message: "No autorizado" });
+        }
+      }
       sheet.deleteRow(idx + 2);
       return jsonOut({ status: "ok" });
     } catch (err) {
