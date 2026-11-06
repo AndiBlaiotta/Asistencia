@@ -1151,8 +1151,12 @@
     <div class="modal-sub" id="msol-sub"></div>
     <label>Tareas que querés que hagamos</label>
     <div id="msol-items"></div>
-    <label style="margin-top:8px;">Día</label>
-    <input type="date" id="msol-fecha">
+    <label style="margin-top:8px;">Día (dd/mm/aaaa)</label>
+    <div class="hora-sel">
+      <select id="msol-dia"></select><span>/</span>
+      <select id="msol-mes"></select><span>/</span>
+      <select id="msol-anio"></select>
+    </div>
     <div class="fo-row">
       <div>
         <label>Desde</label>
@@ -5320,6 +5324,29 @@
     return h ? (h + ":" + m) : "";
   }
 
+  // Selector de fecha propio en dd/mm/aaaa (sin el calendario nativo, que muestra
+  // la fecha en el formato del equipo). Devuelve/arranca en el día de hoy.
+  function llenarFechaSelect() {
+    const dSel = document.getElementById("msol-dia");
+    const mSel = document.getElementById("msol-mes");
+    const aSel = document.getElementById("msol-anio");
+    let d = ""; for (let i = 1; i <= 31; i++) d += `<option value="${pad2(i)}">${pad2(i)}</option>`;
+    let m = ""; for (let i = 1; i <= 12; i++) m += `<option value="${pad2(i)}">${pad2(i)}</option>`;
+    const y = new Date().getFullYear(); let a = "";
+    for (let i = y; i <= y + 1; i++) a += `<option value="${i}">${i}</option>`;
+    dSel.innerHTML = d; mSel.innerHTML = m; aSel.innerHTML = a;
+    const hoy = new Date();
+    dSel.value = pad2(hoy.getDate());
+    mSel.value = pad2(hoy.getMonth() + 1);
+    aSel.value = String(hoy.getFullYear());
+  }
+  function leerFechaSelect() {
+    const d = document.getElementById("msol-dia").value;
+    const m = document.getElementById("msol-mes").value;
+    const a = document.getElementById("msol-anio").value;
+    return (d && m && a) ? `${d}/${m}/${a}` : "";
+  }
+
   // Abre el modal de solicitud para un depto, con la checklist y el día de hoy.
   let solModal = null; // { ei, depto }
   function openSolicitudModal(ei, depto) {
@@ -5332,7 +5359,7 @@
                onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
         <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
       </label>`).join("");
-    document.getElementById("msol-fecha").value = new Date().toISOString().slice(0, 10);
+    llenarFechaSelect();
     llenarHoraSelect("msol-desde-h", "msol-desde-m");
     llenarHoraSelect("msol-hasta-h", "msol-hasta-m");
     document.getElementById("msol-nota").value  = "";
@@ -5349,18 +5376,18 @@
     const msg = document.getElementById("msol-msg");
     const edificio = clienteData.edificios[solModal.ei].nombre;
     const tareas = Array.from(document.querySelectorAll(".msol-chk:checked")).map(c => c.value);
-    const fechaIso = document.getElementById("msol-fecha").value;
+    const fecha = leerFechaSelect();
     const desde = leerHoraSelect("msol-desde-h", "msol-desde-m");
     const hasta = leerHoraSelect("msol-hasta-h", "msol-hasta-m");
     const nota  = document.getElementById("msol-nota").value.trim();
     if (!tareas.length) { msg.className = "error"; msg.textContent = "Elegí al menos una tarea."; return; }
-    if (!fechaIso)      { msg.className = "error"; msg.textContent = "Elegí el día."; return; }
+    if (!fecha)         { msg.className = "error"; msg.textContent = "Elegí el día."; return; }
     if (!desde)         { msg.className = "error"; msg.textContent = "Poné el horario (desde)."; return; }
     msg.className = "success"; msg.textContent = "Enviando...";
     try {
       const j = await fetchJson({
         action: "solicitarLimpieza", admin: currentUser, hash: currentHash,
-        edificio, depto: solModal.depto, fecha: isoToDMY(fechaIso), desde, hasta, nota,
+        edificio, depto: solModal.depto, fecha, desde, hasta, nota,
         tareas: tareas.join("|")
       });
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
