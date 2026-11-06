@@ -824,7 +824,10 @@
     <button class="btn btn-primary admin-main-btn" onclick="openAdminHorasAsignadas()" style="margin-bottom:8px;">🕐 Horas asignadas</button>
 
     <!-- Finales de obra (directo) -->
-    <button class="btn btn-primary admin-main-btn" onclick="openAdminFinales()" style="margin-bottom:18px;">🏗️ Finales de obra</button>
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminFinales()" style="margin-bottom:8px;">🏗️ Finales de obra</button>
+
+    <!-- Clientes / deptos temporarios (directo) -->
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminClientes()" style="margin-bottom:18px;">🏢 Clientes (deptos)</button>
 
     <!-- Vista previa: ver la app tal como la ve un empleado (modo prueba) -->
     <div class="section-title">👁️ Ver la app como un empleado</div>
@@ -960,6 +963,17 @@
     <div class="section-title" style="margin-top:22px;">Finales de obra cargados</div>
     <button class="btn-refresh" onclick="loadAdminFinales()">🔄 Actualizar</button>
     <div id="admin-finales-list"></div>
+  </div>
+
+  <!-- CLIENTES: deptos temporarios (vista previa desde la cuenta admin) -->
+  <div id="admin-step-clientes" style="display:none;">
+    <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
+    <div class="section-title" style="margin-top:16px;">🏢 Clientes · Deptos temporarios</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px;">Vista de prueba (solo admin). La clienta solicita la limpieza de cada depto (qué tareas quiere + día y horario); nosotros la marcamos hecha y el depto queda libre para la próxima solicitud.</div>
+    <button class="btn-refresh" onclick="loadClienteDeptos()">🔄 Actualizar</button>
+    <div id="cliente-deptos"></div>
+    <div class="section-title" style="margin-top:22px;">✅ Limpiezas hechas (historial)</div>
+    <div id="cliente-historial"></div>
   </div>
 
   <!-- HORAS EXTRA: conteo por empleado y por mes -->
@@ -3046,6 +3060,7 @@
     document.getElementById("admin-step-cargarfichada").style.display = step === "cargarfichada" ? "block" : "none";
     document.getElementById("admin-step-horasasignadas").style.display = step === "horasasignadas" ? "block" : "none";
     document.getElementById("admin-step-finales").style.display = step === "finales" ? "block" : "none";
+    document.getElementById("admin-step-clientes").style.display = step === "clientes" ? "block" : "none";
     document.getElementById("admin-step-compras").style.display = step === "compras" ? "block" : "none";
     document.getElementById("admin-step-comprasserv").style.display = step === "comprasserv" ? "block" : "none";
     document.getElementById("admin-step-supervisiones").style.display = step === "supervisiones" ? "block" : "none";
@@ -5203,6 +5218,149 @@
     if (j.status !== "ok") { alert(j.message || "No se pudo eliminar."); return; }
     adminFinalesCache = null;
     loadAdminFinales();
+  }
+
+  // ---------- CLIENTES / DEPTOS TEMPORARIOS (vista previa admin) ----------
+  // Ciclo por depto: LIBRE → (clienta) SOLICITADO (tareas + día/horario) →
+  // (nosotros) HECHO → vuelve a LIBRE. V1 todo desde la cuenta admin.
+  let clienteData = null; // { edificios:[{nombre,deptos:[{depto,pendiente}]}], items, hechas }
+
+  function openAdminClientes() { adminShowStep("clientes"); loadClienteDeptos(); }
+
+  async function loadClienteDeptos() {
+    const cont = document.getElementById("cliente-deptos");
+    cont.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
+    try {
+      const j = await fetchJson({ action: "deptosClienteEstado", admin: currentUser, hash: currentHash });
+      if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
+      clienteData = j;
+      renderClienteDeptos();
+      renderClienteHistorial();
+    } catch (e) {
+      cont.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
+      document.getElementById("cliente-historial").innerHTML = "";
+    }
+  }
+
+  // Formulario (colapsado) para solicitar la limpieza de un depto libre.
+  function clienteFormHtml(ei, depto) {
+    const f = `sf-${ei}-${depto}`;
+    const hoy = new Date().toISOString().slice(0, 10);
+    const items = (clienteData.items || []).map(it => `
+      <label class="fo-chip" style="align-items:flex-start;">
+        <input type="checkbox" class="${f}-chk" value="${it.clave}"
+               onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
+        <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
+      </label>`).join("");
+    return `
+      <div id="${f}-box" style="display:none;padding:10px;border:1px solid var(--cyan-mid);border-radius:10px;margin:8px 0;">
+        <label>Tareas que querés que hagamos</label>
+        <div id="${f}-items">${items}</div>
+        <label style="margin-top:8px;">Día</label>
+        <input type="date" id="${f}-fecha" value="${hoy}">
+        <div class="fo-row">
+          <div><label>Desde</label><input type="time" id="${f}-desde"></div>
+          <div><label>Hasta (opcional)</label><input type="time" id="${f}-hasta"></div>
+        </div>
+        <label>Nota (opcional)</label>
+        <input type="text" id="${f}-nota" placeholder="Ej: el huésped se va 11hs">
+        <button class="btn btn-primary" onclick="enviarSolicitud(${ei}, '${depto}')">Enviar solicitud</button>
+        <div id="${f}-msg" style="margin-top:6px;font-size:13px;"></div>
+      </div>`;
+  }
+
+  function renderClienteDeptos() {
+    const cont = document.getElementById("cliente-deptos");
+    const eds = (clienteData && clienteData.edificios) || [];
+    if (!eds.length) { cont.innerHTML = `<div class="hist-empty">Sin edificios configurados.</div>`; return; }
+    cont.innerHTML = eds.map((e, ei) => {
+      const deptos = e.deptos.map(d => {
+        if (d.pendiente) {
+          const s = d.pendiente;
+          const horario = hora24(s.desde) + (s.hasta ? "–" + hora24(s.hasta) : "");
+          return `
+            <div class="hist-row">
+              <div>
+                <div class="hr-serv">🏠 Depto ${d.depto} · <span style="color:#c2410c;font-weight:700;">Solicitado</span></div>
+                <div class="hr-hora">📅 ${s.fecha} · 🕒 ${horario}</div>
+                <div class="hr-hora">🧹 ${s.tareas.join(", ")}</div>
+                ${s.nota ? `<div class="hr-hora">📝 ${s.nota}</div>` : ""}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+                <button class="btn-mini" style="background:#0a7d5a;color:#fff;border:none;margin:0;" onclick="marcarLimpiezaHecha('${s.id}')">✅ Hecho</button>
+                <button class="btn-mini btn-anular" onclick="cancelarLimpieza('${s.id}')">✖ Cancelar</button>
+              </div>
+            </div>`;
+        }
+        return `
+          <div class="hist-row">
+            <div><div class="hr-serv">🏠 Depto ${d.depto} · <span style="color:var(--gray);">Libre</span></div></div>
+            <button class="btn-mini btn-cambiar" style="margin:0;" onclick="toggleSolForm('sf-${ei}-${d.depto}-box')">➕ Solicitar</button>
+          </div>
+          ${clienteFormHtml(ei, d.depto)}`;
+      }).join("");
+      return `<div class="hist-day"><div class="hist-day-label">🏢 ${e.nombre}</div>${deptos}</div>`;
+    }).join("");
+  }
+
+  function toggleSolForm(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+  }
+
+  async function enviarSolicitud(ei, depto) {
+    const f = `sf-${ei}-${depto}`;
+    const msg = document.getElementById(`${f}-msg`);
+    const edificio = clienteData.edificios[ei].nombre;
+    const tareas = Array.from(document.querySelectorAll(`.${f}-chk:checked`)).map(c => c.value);
+    const fechaIso = document.getElementById(`${f}-fecha`).value;
+    const desde = document.getElementById(`${f}-desde`).value;
+    const hasta = document.getElementById(`${f}-hasta`).value;
+    const nota  = document.getElementById(`${f}-nota`).value.trim();
+    if (!tareas.length) { msg.className = "error"; msg.textContent = "Elegí al menos una tarea."; return; }
+    if (!fechaIso)      { msg.className = "error"; msg.textContent = "Elegí el día."; return; }
+    if (!desde)         { msg.className = "error"; msg.textContent = "Poné el horario (desde)."; return; }
+    msg.className = "success"; msg.textContent = "Enviando...";
+    try {
+      const j = await fetchJson({
+        action: "solicitarLimpieza", admin: currentUser, hash: currentHash,
+        edificio, depto, fecha: isoToDMY(fechaIso), desde, hasta, nota,
+        tareas: tareas.join("|")
+      });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
+      loadClienteDeptos();
+    } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
+  }
+
+  async function marcarLimpiezaHecha(id) {
+    if (!confirm("¿Marcar esta limpieza como hecha? El depto queda libre para una nueva solicitud.")) return;
+    const j = await fetchJson({ action: "marcarLimpiezaHecha", admin: currentUser, hash: currentHash, id });
+    if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
+    loadClienteDeptos();
+  }
+
+  async function cancelarLimpieza(id) {
+    if (!confirm("¿Cancelar esta solicitud?")) return;
+    const j = await fetchJson({ action: "cancelarLimpieza", admin: currentUser, hash: currentHash, id });
+    if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
+    loadClienteDeptos();
+  }
+
+  function renderClienteHistorial() {
+    const el = document.getElementById("cliente-historial");
+    const hechas = (clienteData && clienteData.hechas) || [];
+    if (!hechas.length) { el.innerHTML = `<div class="hist-empty">Todavía no hay limpiezas hechas.</div>`; return; }
+    el.innerHTML = hechas.map(s => {
+      const horario = hora24(s.desde) + (s.hasta ? "–" + hora24(s.hasta) : "");
+      return `
+        <div class="hist-row salida">
+          <div>
+            <div class="hr-serv">🏠 Depto ${s.depto} · ${s.edificio}</div>
+            <div class="hr-hora">📅 ${s.fecha} · 🕒 ${horario} · 🧹 ${s.tareas.join(", ")}</div>
+            <div class="hr-hora">✅ Hecho${s.fechaHecho ? " · " + s.fechaHecho : ""}${s.hechoPor ? " · " + s.hechoPor : ""}</div>
+          </div>
+        </div>`;
+    }).join("");
   }
 
   // ---------- MATERIALES Y COMPRAS (admin, acceso único) ----------

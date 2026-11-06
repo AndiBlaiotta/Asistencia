@@ -40,7 +40,8 @@ const HEADERS = [
 // todas las hojas como si fueran de empleados (adminResumen, adminTardanzas).
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
                            "Vacaciones", "Coberturas", "Ausencias", "Permisos",
-                           "Tiempo Extra", "Supervisiones", "Finales de obra"];
+                           "Tiempo Extra", "Supervisiones", "Finales de obra",
+                           "Solicitudes Deptos"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -56,6 +57,37 @@ const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente
 // la dirección ya cargada. Empleados = lista separada por " | ".
 const FINALES_SHEET   = "Finales de obra";
 const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleados", "Nota", "Creado"];
+
+// ---- Clientes / Limpieza de departamentos temporarios (2026-11-06) ----
+// Una clienta administra deptos temporarios en un edificio. Por cada depto hace
+// una SOLICITUD de limpieza (qué tareas quiere + día y horario); nosotros vamos,
+// cumplimos y marcamos "Hecho" → el ciclo se cierra y el depto queda LIBRE para
+// la próxima solicitud (mismo criterio de 3 estados que los materiales). Config
+// hardcodeada, como SERVICIOS/PRODUCTOS. V1 (2026-11-06): la vista de la clienta
+// se prueba desde la cuenta admin; el login real de la clienta viene después.
+const CLIENTE_EDIFICIOS = [
+  { nombre: "Ravignani 2314, Palermo",
+    deptos: ["101", "102", "201", "202", "401", "402", "501", "502", "701"] }
+];
+// Ítems de la checklist = el pedido de la clienta (qué quiere que hagamos).
+// clave = lo que se guarda/muestra corto; detalle = descripción. Iguales para
+// todos los deptos. (El ítem "Llaves y acceso" quedó afuera a pedido de Andi.)
+const CHECKLIST_DEPTO = [
+  { clave: "Baño",                          detalle: "Limpieza completa y desinfección." },
+  { clave: "Ropa blanca",                   detalle: "Cambio de sábanas y toallas, y cama tendida igual que en las fotos del aviso." },
+  { clave: "Cocina",                        detalle: "Limpieza, lavado de vajilla y limpieza por dentro de microondas, cafetera y pava." },
+  { clave: "Heladera y residuos",           detalle: "Vaciar lo que dejaron los huéspedes y sacar la basura." },
+  { clave: "Pisos",                         detalle: "Aspirado o barrido y trapeado." },
+  { clave: "Vidrios",                       detalle: "Solo cara interior y lo que se alcanza desde el balcón." },
+  { clave: "Muebles",                       detalle: "Quitar el polvo de todas las superficies." },
+  { clave: "Desinfección de lo más tocado", detalle: "Picaportes, llaves de luz, controles remotos y canillas." },
+  { clave: "Reposición de consumibles",     detalle: "Papel higiénico, jabón, shampoo, café y bolsas (cobrados aparte si los ponemos nosotros)." },
+  { clave: "Inspección y reporte",          detalle: "Daños, faltantes, objetos olvidados y cosas que no funcionan, con fotos para el dueño." },
+  { clave: "Limpieza profunda mensual",     detalle: "Horno, heladera a fondo, colchones, cortinas y vidrios exteriores (cotizada aparte)." }
+];
+const SOLICITUDES_SHEET   = "Solicitudes Deptos";
+const SOLICITUDES_HEADERS = ["ID", "Edificio", "Depto", "Estado", "Fecha", "Desde",
+  "Hasta", "Tareas", "Nota", "Creado", "Hecho por", "Fecha hecho"];
 
 // Tipos de licencia (van todos a la hoja "Vacaciones", campo Tipo). Solo
 // "Vacaciones" consume días de cupo y tiene la regla de 7; el resto es por
@@ -1152,6 +1184,29 @@ function getFinalesSheet() {
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+function getSolicitudesSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SOLICITUDES_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SOLICITUDES_SHEET);
+    sheet.appendRow(SOLICITUDES_HEADERS);
+    sheet.getRange(1, 1, 1, SOLICITUDES_HEADERS.length)
+      .setBackground("#0a7d5a").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+// Valida que el edificio/depto existan en la config. Devuelve el edificio o null.
+function edificioConDepto(edificio, depto) {
+  for (let i = 0; i < CLIENTE_EDIFICIOS.length; i++) {
+    const e = CLIENTE_EDIFICIOS[i];
+    if (e.nombre === edificio && e.deptos.indexOf(depto) !== -1) return e;
+  }
+  return null;
+}
+function esTareaValida(clave) {
+  return CHECKLIST_DEPTO.some(function (t) { return t.clave === clave; });
 }
 function getPermisosSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -2992,6 +3047,137 @@ function doGet(e) {
       });
       records.sort((a, b) => fechaAInt(a.fecha) - fechaAInt(b.fecha));
       return jsonOut({ status: "ok", records });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ==========================================================
+  // CLIENTES / LIMPIEZA DE DEPTOS TEMPORARIOS
+  // Ciclo por depto: LIBRE → (clienta) SOLICITADO con tareas+día+horario →
+  // (nosotros) HECHO → se cierra y vuelve a LIBRE. V1: todo detrás de checkAdmin
+  // (se prueba desde la cuenta admin). Al pasar a real se agrega el rol clienta.
+  // ==========================================================
+
+  // ---- Estado de todos los deptos del cliente: config (edificios + checklist)
+  // + la solicitud PENDIENTE de cada depto (si la hay) + historial de HECHAS. ----
+  if (p.action === "deptosClienteEstado") {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getSolicitudesSheet();
+      const pend = {};        // "edificio||depto" -> solicitud pendiente
+      const hechas = [];      // historial (más nuevo arriba)
+      if (sheet.getLastRow() > 1) {
+        const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, SOLICITUDES_HEADERS.length).getValues();
+        data.forEach(function (r, i) {
+          const sol = {
+            id: r[0], edificio: r[1], depto: r[2], estado: r[3], fecha: r[4],
+            desde: r[5], hasta: r[6],
+            tareas: (r[7] || "").toString().split("|").map(function (s) { return s.trim(); }).filter(Boolean),
+            nota: r[8], creado: r[9], hechoPor: r[10], fechaHecho: r[11], fila: i + 2
+          };
+          if (sol.estado === "Pendiente") pend[sol.edificio + "||" + sol.depto] = sol;
+          else if (sol.estado === "Hecho") hechas.push(sol);
+        });
+      }
+      hechas.sort(function (a, b) { return (b.fila) - (a.fila); });
+      const edificios = CLIENTE_EDIFICIOS.map(function (e) {
+        return {
+          nombre: e.nombre,
+          deptos: e.deptos.map(function (d) {
+            return { depto: d, pendiente: pend[e.nombre + "||" + d] || null };
+          })
+        };
+      });
+      return jsonOut({ status: "ok", edificios: edificios, items: CHECKLIST_DEPTO, hechas: hechas });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- La clienta (hoy simulada por el admin) solicita una limpieza de un depto. ----
+  if (p.action === "solicitarLimpieza" && p.edificio && p.depto && p.fecha && p.tareas) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      if (!edificioConDepto(p.edificio, p.depto)) {
+        return jsonOut({ status: "error", message: "Edificio o depto inválido" });
+      }
+      if (isNaN(fechaAInt(p.fecha))) return jsonOut({ status: "error", message: "Fecha inválida" });
+      const desde = (p.desde || "").toString().trim();
+      const hasta = (p.hasta || "").toString().trim();
+      const reHora = /^\d{1,2}:\d{2}$/;
+      if (!reHora.test(desde)) return jsonOut({ status: "error", message: "Poné el horario (desde) en HH:MM" });
+      if (hasta && !reHora.test(hasta)) return jsonOut({ status: "error", message: "Horario (hasta) inválido" });
+      const tareas = (p.tareas || "").toString().split("|").map(function (s) { return s.trim(); })
+        .filter(function (s) { return s && esTareaValida(s); });
+      if (!tareas.length) return jsonOut({ status: "error", message: "Elegí al menos una tarea" });
+      const sheet = getSolicitudesSheet();
+      // Candado: no dos pedidos pendientes para el mismo depto.
+      if (sheet.getLastRow() > 1) {
+        const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+        const yaHay = data.some(function (r) {
+          return (r[1] || "").toString() === p.edificio &&
+                 (r[2] || "").toString() === p.depto &&
+                 (r[3] || "").toString() === "Pendiente";
+        });
+        if (yaHay) return jsonOut({ status: "error", message: "Ese depto ya tiene una limpieza pendiente" });
+      }
+      const id  = Utilities.getUuid().slice(0, 8);
+      const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      const row = sheet.getLastRow() + 1;
+      sheet.getRange(row, 1, 1, SOLICITUDES_HEADERS.length).setNumberFormat("@")
+        .setValues([[id, p.edificio, p.depto, "Pendiente", p.fecha, desde, hasta,
+                     tareas.join(" | "), (p.nota || "").toString().trim(), now, "", ""]]);
+      return jsonOut({ status: "ok", id: id });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Cancelar una solicitud PENDIENTE (borra la fila). ----
+  if (p.action === "cancelarLimpieza" && p.id) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getSolicitudesSheet();
+      const last = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay solicitudes" });
+      const data = sheet.getRange(2, 1, last - 1, 4).getValues();
+      const idx = data.findIndex(function (r) {
+        return (r[0] || "").toString() === p.id && (r[3] || "").toString() === "Pendiente";
+      });
+      if (idx === -1) return jsonOut({ status: "error", message: "No encontrada o ya resuelta" });
+      sheet.deleteRow(idx + 2);
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Nosotros marcamos una solicitud como HECHA (cierra el ciclo). ----
+  if (p.action === "marcarLimpiezaHecha" && p.id) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const sheet = getSolicitudesSheet();
+      const last = sheet.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay solicitudes" });
+      const data = sheet.getRange(2, 1, last - 1, 4).getValues();
+      const idx = data.findIndex(function (r) {
+        return (r[0] || "").toString() === p.id && (r[3] || "").toString() === "Pendiente";
+      });
+      if (idx === -1) return jsonOut({ status: "error", message: "No encontrada o ya resuelta" });
+      const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      sheet.getRange(idx + 2, 4).setNumberFormat("@").setValue("Hecho");
+      sheet.getRange(idx + 2, 11, 1, 2).setNumberFormat("@")
+        .setValues([[(p.admin || "").toString(), now]]);
+      return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
