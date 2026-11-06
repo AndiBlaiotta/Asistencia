@@ -471,6 +471,11 @@
     .modal-box textarea:focus { border-color: var(--cyan); background: white; }
     /* Modal con contenido largo (ej. solicitar limpieza): scrollea adentro. */
     .modal-box.modal-scroll { max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    /* Selector de hora propio (hh:mm) en 24h, para no depender del picker nativo
+       del sistema (que muestra AM/PM según el idioma del equipo). */
+    .hora-sel { display: flex; align-items: center; gap: 6px; }
+    .hora-sel select { text-align: center; padding: 13px 8px; }
+    .hora-sel span { font-weight: 700; color: var(--gray); }
 
     /* ---- SCREENS ---- */
     #screen-login  { display: block; }
@@ -1149,8 +1154,14 @@
     <label style="margin-top:8px;">Día</label>
     <input type="date" id="msol-fecha">
     <div class="fo-row">
-      <div><label>Desde</label><input type="time" id="msol-desde"></div>
-      <div><label>Hasta (opcional)</label><input type="time" id="msol-hasta"></div>
+      <div>
+        <label>Desde</label>
+        <div class="hora-sel"><select id="msol-desde-h"></select><span>:</span><select id="msol-desde-m"></select></div>
+      </div>
+      <div>
+        <label>Hasta (opcional)</label>
+        <div class="hora-sel"><select id="msol-hasta-h"></select><span>:</span><select id="msol-hasta-m"></select></div>
+      </div>
     </div>
     <label>Nota (opcional)</label>
     <input type="text" id="msol-nota" placeholder="Ej: el huésped se va 11hs">
@@ -5290,6 +5301,25 @@
     }).join("");
   }
 
+  // Selector de hora 24h propio (hh + mm), para no depender del picker nativo
+  // del sistema (que muestra AM/PM según el idioma del equipo).
+  function llenarHoraSelect(hSelId, mSelId) {
+    const hSel = document.getElementById(hSelId);
+    const mSel = document.getElementById(mSelId);
+    let ho = `<option value="">--</option>`;
+    for (let h = 0; h < 24; h++) ho += `<option value="${pad2(h)}">${pad2(h)}</option>`;
+    hSel.innerHTML = ho;
+    let mo = "";
+    for (let m = 0; m < 60; m += 5) mo += `<option value="${pad2(m)}">${pad2(m)}</option>`;
+    mSel.innerHTML = mo;
+    hSel.value = ""; mSel.value = "00";
+  }
+  function leerHoraSelect(hSelId, mSelId) {
+    const h = document.getElementById(hSelId).value;
+    const m = document.getElementById(mSelId).value || "00";
+    return h ? (h + ":" + m) : "";
+  }
+
   // Abre el modal de solicitud para un depto, con la checklist y el día de hoy.
   let solModal = null; // { ei, depto }
   function openSolicitudModal(ei, depto) {
@@ -5303,8 +5333,8 @@
         <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
       </label>`).join("");
     document.getElementById("msol-fecha").value = new Date().toISOString().slice(0, 10);
-    document.getElementById("msol-desde").value = "";
-    document.getElementById("msol-hasta").value = "";
+    llenarHoraSelect("msol-desde-h", "msol-desde-m");
+    llenarHoraSelect("msol-hasta-h", "msol-hasta-m");
     document.getElementById("msol-nota").value  = "";
     document.getElementById("msol-msg").textContent = "";
     document.getElementById("modal-solicitud").style.display = "flex";
@@ -5320,8 +5350,8 @@
     const edificio = clienteData.edificios[solModal.ei].nombre;
     const tareas = Array.from(document.querySelectorAll(".msol-chk:checked")).map(c => c.value);
     const fechaIso = document.getElementById("msol-fecha").value;
-    const desde = document.getElementById("msol-desde").value;
-    const hasta = document.getElementById("msol-hasta").value;
+    const desde = leerHoraSelect("msol-desde-h", "msol-desde-m");
+    const hasta = leerHoraSelect("msol-hasta-h", "msol-hasta-m");
     const nota  = document.getElementById("msol-nota").value.trim();
     if (!tareas.length) { msg.className = "error"; msg.textContent = "Elegí al menos una tarea."; return; }
     if (!fechaIso)      { msg.className = "error"; msg.textContent = "Elegí el día."; return; }
