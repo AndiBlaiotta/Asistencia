@@ -934,16 +934,20 @@
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
     <div class="section-title" style="margin-top:16px;">🏗️ Programar un Final de obra</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:10px;">Cargá fecha, horario y dirección, y elegí a los empleados. Lo van a ver apenas lo guardes; el día del evento les aparece listo para fichar.</div>
-    <label>Fecha</label>
-    <input type="date" id="fo-fecha">
+    <label>Fecha (dd/mm/aaaa)</label>
+    <div class="hora-sel">
+      <select id="fo-dia"></select><span>/</span>
+      <select id="fo-mes"></select><span>/</span>
+      <select id="fo-anio"></select>
+    </div>
     <div class="fo-row">
       <div>
         <label>Desde</label>
-        <input type="time" id="fo-inicio">
+        <div class="hora-sel"><select id="fo-inicio-h"></select><span>:</span><select id="fo-inicio-m"></select></div>
       </div>
       <div>
         <label>Hasta</label>
-        <input type="time" id="fo-fin">
+        <div class="hora-sel"><select id="fo-fin-h"></select><span>:</span><select id="fo-fin-m"></select></div>
       </div>
     </div>
     <label>Dirección</label>
@@ -5175,9 +5179,9 @@
   // Vuelve el formulario al estado "alta nueva" (vacío) y sale de edición.
   function cancelarEdicionFinal() {
     finalObraEditId = null;
-    document.getElementById("fo-fecha").value  = new Date().toISOString().slice(0, 10);
-    document.getElementById("fo-inicio").value = "";
-    document.getElementById("fo-fin").value    = "";
+    llenarFechaSelect("fo-dia", "fo-mes", "fo-anio");
+    llenarHoraSelect("fo-inicio-h", "fo-inicio-m");
+    llenarHoraSelect("fo-fin-h", "fo-fin-m");
     document.getElementById("fo-dir").value    = "";
     document.getElementById("fo-nota").value   = "";
     document.getElementById("fo-msg").textContent = "";
@@ -5191,9 +5195,9 @@
     const r = (adminFinalesCache || []).find(x => x.id === id);
     if (!r) return;
     finalObraEditId = id;
-    document.getElementById("fo-fecha").value  = isoFromDMY(r.fecha);
-    document.getElementById("fo-inicio").value = hora24(r.inicio);
-    document.getElementById("fo-fin").value    = hora24(r.fin);
+    llenarFechaSelect("fo-dia", "fo-mes", "fo-anio", r.fecha);
+    llenarHoraSelect("fo-inicio-h", "fo-inicio-m", hora24(r.inicio));
+    llenarHoraSelect("fo-fin-h", "fo-fin-m", hora24(r.fin));
     document.getElementById("fo-dir").value    = r.direccion || "";
     document.getElementById("fo-nota").value   = r.nota || "";
     document.getElementById("fo-msg").textContent = "";
@@ -5205,13 +5209,13 @@
 
   async function crearFinalObra() {
     const msg = document.getElementById("fo-msg");
-    const fechaIso = document.getElementById("fo-fecha").value;
-    const inicio   = document.getElementById("fo-inicio").value;
-    const fin      = document.getElementById("fo-fin").value;
+    const fecha    = leerFechaSelect("fo-dia", "fo-mes", "fo-anio");
+    const inicio   = leerHoraSelect("fo-inicio-h", "fo-inicio-m");
+    const fin      = leerHoraSelect("fo-fin-h", "fo-fin-m");
     const dir      = document.getElementById("fo-dir").value.trim();
     const nota     = document.getElementById("fo-nota").value.trim();
     const empleados = Array.from(document.querySelectorAll(".fo-emp-chk:checked")).map(c => c.value);
-    if (!fechaIso)        { msg.className = "error"; msg.textContent = "Elegí la fecha."; return; }
+    if (!fecha)           { msg.className = "error"; msg.textContent = "Elegí la fecha."; return; }
     if (!inicio || !fin)  { msg.className = "error"; msg.textContent = "Poné horario desde y hasta."; return; }
     if (!dir)             { msg.className = "error"; msg.textContent = "Poné la dirección."; return; }
     if (!empleados.length){ msg.className = "error"; msg.textContent = "Elegí al menos un empleado."; return; }
@@ -5221,7 +5225,7 @@
       const params = {
         action: editando ? "adminEditarFinalObra" : "adminCrearFinalObra",
         admin: currentUser, hash: currentHash,
-        fecha: isoToDMY(fechaIso), inicio, fin, direccion: dir, nota,
+        fecha, inicio, fin, direccion: dir, nota,
         empleados: empleados.join("|")
       };
       if (editando) params.id = finalObraEditId;
@@ -5359,8 +5363,9 @@
   }
 
   // Selector de hora 24h propio (hh + mm), para no depender del picker nativo
-  // del sistema (que muestra AM/PM según el idioma del equipo).
-  function llenarHoraSelect(hSelId, mSelId) {
+  // del sistema (que muestra AM/PM según el idioma del equipo). `valor` opcional
+  // ("HH:MM") preselecciona; si no, queda vacío.
+  function llenarHoraSelect(hSelId, mSelId, valor) {
     const hSel = document.getElementById(hSelId);
     const mSel = document.getElementById(mSelId);
     let ho = `<option value="">--</option>`;
@@ -5369,7 +5374,9 @@
     let mo = "";
     for (let m = 0; m < 60; m += 5) mo += `<option value="${pad2(m)}">${pad2(m)}</option>`;
     mSel.innerHTML = mo;
-    hSel.value = ""; mSel.value = "00";
+    const mm = /^(\d{1,2}):(\d{2})/.exec(valor || "");
+    hSel.value = mm ? pad2(+mm[1]) : "";
+    mSel.value = mm ? mm[2] : "00";
   }
   function leerHoraSelect(hSelId, mSelId) {
     const h = document.getElementById(hSelId).value;
@@ -5378,25 +5385,28 @@
   }
 
   // Selector de fecha propio en dd/mm/aaaa (sin el calendario nativo, que muestra
-  // la fecha en el formato del equipo). Devuelve/arranca en el día de hoy.
-  function llenarFechaSelect() {
-    const dSel = document.getElementById("msol-dia");
-    const mSel = document.getElementById("msol-mes");
-    const aSel = document.getElementById("msol-anio");
+  // la fecha en el formato del equipo). `dmy` opcional ("dd/mm/aaaa") preselecciona;
+  // si no, arranca en el día de hoy.
+  function llenarFechaSelect(dId, mId, aId, dmy) {
+    const dSel = document.getElementById(dId);
+    const mSel = document.getElementById(mId);
+    const aSel = document.getElementById(aId);
     let d = ""; for (let i = 1; i <= 31; i++) d += `<option value="${pad2(i)}">${pad2(i)}</option>`;
     let m = ""; for (let i = 1; i <= 12; i++) m += `<option value="${pad2(i)}">${pad2(i)}</option>`;
     const y = new Date().getFullYear(); let a = "";
     for (let i = y; i <= y + 1; i++) a += `<option value="${i}">${i}</option>`;
     dSel.innerHTML = d; mSel.innerHTML = m; aSel.innerHTML = a;
+    const p = (dmy || "").split("/");
+    const base = p.length === 3 ? { d: pad2(+p[0]), m: pad2(+p[1]), a: p[2] } : null;
     const hoy = new Date();
-    dSel.value = pad2(hoy.getDate());
-    mSel.value = pad2(hoy.getMonth() + 1);
-    aSel.value = String(hoy.getFullYear());
+    dSel.value = base ? base.d : pad2(hoy.getDate());
+    mSel.value = base ? base.m : pad2(hoy.getMonth() + 1);
+    aSel.value = base ? base.a : String(hoy.getFullYear());
   }
-  function leerFechaSelect() {
-    const d = document.getElementById("msol-dia").value;
-    const m = document.getElementById("msol-mes").value;
-    const a = document.getElementById("msol-anio").value;
+  function leerFechaSelect(dId, mId, aId) {
+    const d = document.getElementById(dId).value;
+    const m = document.getElementById(mId).value;
+    const a = document.getElementById(aId).value;
     return (d && m && a) ? `${d}/${m}/${a}` : "";
   }
 
@@ -5412,7 +5422,7 @@
                onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
         <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
       </label>`).join("");
-    llenarFechaSelect();
+    llenarFechaSelect("msol-dia", "msol-mes", "msol-anio");
     llenarHoraSelect("msol-desde-h", "msol-desde-m");
     llenarHoraSelect("msol-hasta-h", "msol-hasta-m");
     document.getElementById("msol-nota").value  = "";
@@ -5429,7 +5439,7 @@
     const msg = document.getElementById("msol-msg");
     const edificio = clienteData.edificios[solModal.ei].nombre;
     const tareas = Array.from(document.querySelectorAll(".msol-chk:checked")).map(c => c.value);
-    const fecha = leerFechaSelect();
+    const fecha = leerFechaSelect("msol-dia", "msol-mes", "msol-anio");
     const desde = leerHoraSelect("msol-desde-h", "msol-desde-m");
     const hasta = leerHoraSelect("msol-hasta-h", "msol-hasta-m");
     const nota  = document.getElementById("msol-nota").value.trim();
