@@ -2548,8 +2548,8 @@
         btn.disabled = false; return;
       }
       msg.className = "success"; msg.textContent = "✅ Solicitud enviada.";
-      document.getElementById("vac-desde").value = "";
-      document.getElementById("vac-hasta").value = "";
+      dtSet("vac-desde", "");
+      dtSet("vac-hasta", "");
       onVacFechas();
       cargarMisVacaciones();
     } catch (e) {
@@ -2597,8 +2597,8 @@
         btn.disabled = false; return;
       }
       msg.className = "success"; msg.textContent = "✅ Licencia cargada.";
-      document.getElementById("lic-desde").value = "";
-      document.getElementById("lic-hasta").value = "";
+      dtSet("lic-desde", "");
+      dtSet("lic-hasta", "");
       onLicFechas();
       cargarMisVacaciones();
     } catch (e) {
@@ -2738,8 +2738,8 @@
       });
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo pedir."); btn.disabled = false; return; }
       msg.className = "success"; msg.textContent = "✅ Permiso solicitado.";
-      document.getElementById("perm-fecha").value = "";
-      document.getElementById("perm-hora").value = "";
+      dtSet("perm-fecha", "");
+      dtSet("perm-hora", "");
       document.getElementById("perm-motivo").value = "";
       cargarMisPermisos();
     } catch (e) {
@@ -3479,8 +3479,7 @@
     if (box) box.open = false;
     const wrap = document.getElementById("af-dir-wrap");
     if (wrap) wrap.style.display = (adminServicio && adminServicio.custom) ? "block" : "none";
-    const f = document.getElementById("af-fecha");
-    if (f) f.value = new Date().toISOString().slice(0, 10);
+    dtSet("af-fecha", new Date().toISOString().slice(0, 10));
     const dir = document.getElementById("af-dir"); if (dir) dir.value = "";
     const msg = document.getElementById("af-msg"); if (msg) msg.textContent = "";
   }
@@ -5033,8 +5032,8 @@
       `<option value="">-- Elegí empleado --</option>` +
       Object.keys(SERVICIOS).map(e => `<option value="${e}">${e}</option>`).join("");
     document.getElementById("cf-serv").innerHTML = `<option value="">-- Elegí empleado primero --</option>`;
-    document.getElementById("cf-fecha").value = new Date().toISOString().slice(0, 10);
-    document.getElementById("cf-hora").value = "";
+    dtSet("cf-fecha", new Date().toISOString().slice(0, 10));
+    dtSet("cf-hora", "");
     document.getElementById("cf-dir-wrap").style.display = "none";
     document.getElementById("cf-msg").textContent = "";
     cfServicios = [];
@@ -5092,7 +5091,7 @@
       });
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = "❌ " + (j.message || "No se pudo cargar."); return; }
       msg.className = "success"; msg.textContent = `✅ ${tipo} cargada para ${emp} en "${s.nombre}".`;
-      document.getElementById("cf-hora").value = "";
+      dtSet("cf-hora", "");
       if (s.custom) document.getElementById("cf-dir").value = "";
     } catch (e) {
       msg.className = "error"; msg.textContent = "❌ " + e.message;
@@ -5746,7 +5745,119 @@
   }
 
 
+  // ============================================================
+  // WIDGETS DE FECHA/HORA — SIEMPRE dd/mm/aaaa y 24h en TODA la app
+  // ------------------------------------------------------------
+  // Los <input type="date"/"time"> nativos muestran la fecha/hora según el
+  // idioma del equipo (AM/PM, mm/dd/aaaa, etc.). Para forzar dd/mm/aaaa y 24h
+  // en todos lados, cada uno se reemplaza por selects propios. El valor queda en
+  // un <input hidden> con el MISMO id y el MISMO formato que tenía el nativo
+  // (fecha ISO "yyyy-mm-dd", hora "HH:MM"), así el resto del código
+  // (getElementById(id).value) sigue funcionando igual. Para SETear un valor por
+  // código usar dtSet(id, valor). Un MutationObserver convierte también los que
+  // se crean dinámicamente (ej. filtros por rango). Los formularios de Finales de
+  // obra y del cliente ya usan selects propios, así que no pasan por acá.
+  const _dtReg = {}; // id -> { tipo, sels, hidden, setFrom(valor) }
+
+  function _dtOpts(desde, hasta, pad, placeholder) {
+    let o = `<option value="">${placeholder}</option>`;
+    for (let i = desde; i <= hasta; i++) {
+      const v = pad ? pad2(i) : String(i);
+      o += `<option value="${v}">${v}</option>`;
+    }
+    return o;
+  }
+  function _dtMinOpts() {
+    let o = "";
+    for (let m = 0; m < 60; m += 5) o += `<option value="${pad2(m)}">${pad2(m)}</option>`;
+    return o;
+  }
+
+  function upgradarUnInput(inp) {
+    if (!inp || !inp.parentNode || !inp.id) return;
+    const id = inp.id;
+    const tipo = inp.type === "time" ? "time" : "date";
+    const handlerAttr = inp.getAttribute("onchange") || "";
+    const valorInicial = inp.value || "";
+    const wrap = document.createElement("div");
+    wrap.className = "hora-sel";
+    const hidden = document.createElement("input");
+    hidden.type = "hidden"; hidden.id = id;
+
+    if (tipo === "date") {
+      const y = new Date().getFullYear();
+      wrap.innerHTML =
+        `<select>${_dtOpts(1, 31, true, "dd")}</select><span>/</span>` +
+        `<select>${_dtOpts(1, 12, true, "mm")}</select><span>/</span>` +
+        `<select>${_dtOpts(y - 1, y + 1, false, "aaaa")}</select>`;
+    } else {
+      wrap.innerHTML =
+        `<select>${_dtOpts(0, 23, true, "--")}</select><span>:</span>` +
+        `<select>${_dtMinOpts()}</select>`;
+    }
+    const sels = Array.from(wrap.querySelectorAll("select"));
+    wrap.appendChild(hidden);
+
+    const sync = () => {
+      if (tipo === "date") {
+        const d = sels[0].value, m = sels[1].value, a = sels[2].value;
+        hidden.value = (d && m && a) ? `${a}-${m}-${d}` : "";
+      } else {
+        const h = sels[0].value, mm = sels[1].value || "00";
+        hidden.value = h ? `${h}:${mm}` : "";
+      }
+    };
+    const setFrom = (valor) => {
+      if (tipo === "date") {
+        const mm = /^(\d{4})-(\d{2})-(\d{2})/.exec(valor || "");
+        sels[0].value = mm ? mm[3] : "";
+        sels[1].value = mm ? mm[2] : "";
+        sels[2].value = mm ? mm[1] : "";
+      } else {
+        const mm = /^(\d{1,2}):(\d{2})/.exec(valor || "");
+        sels[0].value = mm ? pad2(+mm[1]) : "";
+        sels[1].value = mm ? mm[2] : "00";
+      }
+      sync();
+    };
+
+    const runHandler = handlerAttr ? new Function(handlerAttr) : null;
+    sels.forEach(s => s.addEventListener("change", () => { sync(); if (runHandler) runHandler(); }));
+
+    setFrom(valorInicial);
+    inp.parentNode.replaceChild(wrap, inp);
+    _dtReg[id] = { tipo, sels, hidden, setFrom };
+  }
+
+  function upgradarCamposFechaHora(root) {
+    (root || document).querySelectorAll('input[type="date"],input[type="time"]').forEach(upgradarUnInput);
+  }
+
+  // Equivalente a `getElementById(id).value = valor` para un campo ya convertido
+  // (valor con el MISMO formato que el nativo: fecha ISO "yyyy-mm-dd", hora "HH:MM").
+  function dtSet(id, valor) {
+    const w = _dtReg[id];
+    if (w) { w.setFrom(valor); return; }
+    const el = document.getElementById(id);
+    if (el) el.value = valor;
+  }
+
+  function iniciarWidgetsFechaHora() {
+    upgradarCamposFechaHora(document);
+    try {
+      const obs = new MutationObserver(muts => {
+        muts.forEach(m => m.addedNodes && m.addedNodes.forEach(n => {
+          if (n.nodeType !== 1) return;
+          if (n.tagName === "INPUT" && (n.type === "date" || n.type === "time")) upgradarUnInput(n);
+          else if (n.querySelectorAll) upgradarCamposFechaHora(n);
+        }));
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+    } catch (e) { /* sin observer: al menos los estáticos ya quedaron convertidos */ }
+  }
+
   // ---------- ARRANQUE ----------
+  iniciarWidgetsFechaHora();
   // Si hay sesión guardada, entrar directo sin pedir login de nuevo.
   restoreSession();
 </script>
