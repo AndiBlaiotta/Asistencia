@@ -1484,7 +1484,7 @@
         ? `<div style="color:#0a2540;font-size:12px;margin-top:2px;">📝 ${f.nota}</div>` : "";
       return `<div style="padding:8px 10px;border-radius:10px;background:#fff4e6;border:1px solid #f3cf9a;margin-bottom:8px;">
         <div style="font-weight:700;color:#0a2540;">🏗️ Final de obra${esHoy ? ` <span style="color:#c2410c;">· ¡HOY!</span>` : ""}</div>
-        <div style="color:#0a2540;font-size:13px;margin-top:2px;">📅 ${dm} · 🕒 ${hora24(f.inicio)}–${hora24(f.fin)}</div>
+        <div style="color:#0a2540;font-size:13px;margin-top:2px;">📅 ${fechaConDia(f.fecha)} · 🕒 ${hora24(f.inicio)}–${hora24(f.fin)}</div>
         <div style="color:#0071A8;font-weight:700;font-size:13px;margin-top:2px;">📍 ${f.direccion}</div>
         ${comp}${nota}
       </div>`;
@@ -1527,7 +1527,7 @@
     if (!ausenciasQueue.length) { cerrarAusencia(); return; }
     const a = ausenciasQueue[0];
     document.getElementById("modal-ausencia-sub").textContent =
-      `No fichaste el ${a.fecha} en "${a.servicio}". Si faltaste, contanos por qué. Si es un error, avisale al administrador.`;
+      `No fichaste el ${fechaConDia(a.fecha)} en "${a.servicio}". Si faltaste, contanos por qué. Si es un error, avisale al administrador.`;
     const txt = document.getElementById("modal-ausencia-text");
     txt.value = "";
     document.getElementById("modal-ausencia-ok").disabled = true;
@@ -1587,7 +1587,7 @@
             ${mesLabel(k)} · ✅ ${just} · ⚠️ ${injust}${sinc ? ` · ${sinc} sin revisar` : ""}
           </div>
           ${rows.map(r => `<div class="hist-row salida">
-            <div><div class="hr-serv">${r.fecha} · ${r.servicio}</div>
+            <div><div class="hr-serv">${fechaConDia(r.fecha)} · ${r.servicio}</div>
                  ${r.motivo ? `<div class="hr-hora">📝 ${r.motivo}</div>` : ""}</div>
             ${ausenciaBadge(r.clasificacion)}
           </div>`).join("")}
@@ -1998,7 +1998,7 @@
           <div class="s-nombre">${s.evento ? "🏗️ " : ""}${s.nombre}</div>
           <div class="s-dir">${s.custom ? "✍️ Escribís la dirección al fichar" : s.dir}</div>
           ${s.horario ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
-          ${s.cobertura ? `<div class="s-dir" style="color:#0071A8;font-weight:700;margin-top:2px;">🔁 Cubriendo a ${s.titular} · hasta ${s.hasta}</div>` : ""}
+          ${s.cobertura ? `<div class="s-dir" style="color:#0071A8;font-weight:700;margin-top:2px;">🔁 Cubriendo a ${s.titular} · hasta ${fechaConDia(s.hasta)}</div>` : ""}
           ${s.evento ? `<div class="s-dir" style="color:#ea580c;font-weight:700;margin-top:2px;">🏗️ Programado para hoy</div>` : ""}
         </div>
         <span class="s-arrow">›</span>
@@ -2385,7 +2385,7 @@
         <div class="hist-row">
           <div>
             <div class="hr-serv">${r.producto}${uni ? " · " + uni : ""}</div>
-            <div class="hr-hora">${r.servicio} · comprado el ${r.fecha}</div>
+            <div class="hr-hora">${r.servicio} · comprado el ${fechaConDia(r.fecha)}</div>
           </div>
           <button class="btn-mini btn-recibido" onclick="retirarMaterial('${r.servicio.replace(/'/g, "\\'")}','${r.producto.replace(/'/g, "\\'")}', this)">🚚 Retirado</button>
         </div>`;
@@ -2429,7 +2429,7 @@
       el.innerHTML = recs.slice(0, 100).map(r => `
         <div class="hist-row ${r.tipo === "Salida" ? "salida" : ""}">
           <div>
-            <div class="hr-serv">${r.fecha} · ${r.servicio}</div>
+            <div class="hr-serv">${fechaConDia(r.fecha)} · ${r.servicio}</div>
             <div class="hr-hora">${r.tipo} ${hora24(r.hora)}${r.estado ? " · " + r.estado : ""}</div>
           </div>
         </div>`).join("");
@@ -2688,7 +2688,7 @@
         <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
           <div>
             <div class="hr-serv">${tipoLicenciaLabel(r.tipo)}</div>
-            <div class="hr-hora">${r.desde} → ${r.hasta} · ${r.dias} ${r.dias == 1 ? "día" : "días"}</div>
+            <div class="hr-hora">${fechaConDia(r.desde)} → ${fechaConDia(r.hasta)} · ${r.dias} ${r.dias == 1 ? "día" : "días"}</div>
           </div>
           ${vacEstadoBadge(r.estado)}
         </div>`).join("");
@@ -2762,7 +2762,7 @@
         <div class="hist-row ${r.estado === "Aceptada" ? "entrada" : r.estado === "Rechazada" ? "salida" : ""}">
           <div>
             <div class="hr-serv">${tipoPermisoLabel(r.tipo)} · ${r.servicio}</div>
-            <div class="hr-hora">${r.fecha} · ${hora24(r.hora)}${r.motivo ? " · " + r.motivo : ""}</div>
+            <div class="hr-hora">${fechaConDia(r.fecha)} · ${hora24(r.hora)}${r.motivo ? " · " + r.motivo : ""}</div>
           </div>
           ${vacEstadoBadge(r.estado)}
         </div>`).join("");
@@ -2890,7 +2890,7 @@
         const uni = p.cantidad ? `${p.cantidad} ${p.cantidad == 1 ? "unidad" : "unidades"}` : "";
         let estadoHtml = "", accionHtml = "";
         if (p.estado === "pedido") {
-          estadoHtml = `<div class="mat-fecha">⏳ Pedido${uni ? " (" + uni + ")" : ""} el ${p.fecha} — esperando compra</div>`;
+          estadoHtml = `<div class="mat-fecha">⏳ Pedido${uni ? " (" + uni + ")" : ""} el ${fechaConDia(p.fecha)} — esperando compra</div>`;
           accionHtml = `<span class="mat-badge" style="background:#fef3c7;color:#b45309;">⏳ Pendiente</span>`;
         } else if (p.estado === "comprado") {
           // Supervisor ACTIVO (2026-10-31): comprado = lo retira el supervisor, sin
@@ -3005,7 +3005,7 @@
         <div class="hist-row ${ui.row}">
           <div>
             <div class="hr-serv">${r.producto}${uni}</div>
-            <div class="hr-hora">${r.fecha} ${hora24(r.hora)} · ${r.empleado}</div>
+            <div class="hr-hora">${fechaConDia(r.fecha)} ${hora24(r.hora)} · ${r.empleado}</div>
           </div>
           <span class="badge ${ui.badge}">${r.accion}</span>
         </div>`;
@@ -3420,7 +3420,7 @@
       <button class="service-card" onclick="adminSelectServicio(${idx})"${s.cobertura ? ' style="border-left-color:#0071A8;"' : ""}>
         <div>
           <div class="s-nombre">${s.nombre}${notaPausa(s.pausado)}</div>
-          <div class="s-dir">${s.cobertura ? `🔁 Cubre a ${s.titular} · ${s.desde}→${s.hasta}`
+          <div class="s-dir">${s.cobertura ? `🔁 Cubre a ${s.titular} · ${fechaConDia(s.desde)}→${fechaConDia(s.hasta)}`
                               : (s.custom ? "✍️ Dirección variable" : s.dir)}</div>
           ${s.horario && !s.cobertura ? `<div class="s-dir" style="color:#4f46e5;font-weight:700;margin-top:2px;">🕐 ${s.horario.texto}</div>` : ""}
         </div>
@@ -3554,7 +3554,7 @@
         const uni = p.cantidad ? ` (${p.cantidad} u.)` : "";
         let fechaHtml, badgeClass, badgeText, itemClass;
         if (p.estado === "pedido") {
-          fechaHtml = `<div class="mat-fecha">⏳ Pedido${uni} el ${p.fecha}</div>`;
+          fechaHtml = `<div class="mat-fecha">⏳ Pedido${uni} el ${fechaConDia(p.fecha)}</div>`;
           badgeClass = "badge-salida"; badgeText = "Pedido"; itemClass = "pedido";
         } else if (p.estado === "comprado") {
           fechaHtml = `<div class="mat-fecha comprado">🛒 Comprado${uni} — en camino</div>`;
@@ -3596,7 +3596,7 @@
         <div class="hist-row ${ui.row}">
           <div>
             <div class="hr-serv">${r.producto}${uni}</div>
-            <div class="hr-hora">${r.fecha} ${hora24(r.hora)} · ${r.empleado}</div>
+            <div class="hr-hora">${fechaConDia(r.fecha)} ${hora24(r.hora)} · ${r.empleado}</div>
           </div>
           <span class="badge ${ui.badge}">${r.accion}</span>
         </div>`;
@@ -3754,7 +3754,7 @@
           <div class="hist-row ${ui.row}">
             <div>
               <div class="hr-serv">${r.producto}${uni}</div>
-              <div class="hr-hora">${r.empleado} · ${r.fecha}${r.hora ? " " + hora24(r.hora) : ""}</div>
+              <div class="hr-hora">${r.empleado} · ${fechaConDia(r.fecha)}${r.hora ? " " + hora24(r.hora) : ""}</div>
             </div>
             <span class="badge ${ui.badge}">${r.accion}</span>
           </div>`;
@@ -3817,7 +3817,7 @@
           <div class="hist-row ${r.estado === 'pedido' ? 'salida' : 'entrada'}">
             <div>
               <div class="hr-serv">${r.producto}${uni}</div>
-              <div class="hr-hora">${r.estado === 'pedido' ? "Pedido" : "Comprado"} el ${r.fecha}</div>
+              <div class="hr-hora">${r.estado === 'pedido' ? "Pedido" : "Comprado"} el ${fechaConDia(r.fecha)}</div>
             </div>
             ${accion}
           </div>`;
@@ -3894,10 +3894,18 @@
 
   // Nombre del día de la semana a partir de "d/M/yyyy" (formato es-AR).
   function diaSemanaNombre(fecha) {
-    const p = (fecha || "").trim().split("/");
+    // Tolera "dd/mm/yyyy" y también "dd/mm/yyyy HH:mm" (toma la parte de fecha).
+    const p = (fecha || "").toString().trim().split(" ")[0].split("/");
     if (p.length !== 3) return "";
     const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-    return dias[new Date(+p[2], +p[1] - 1, +p[0]).getDay()] || "";
+    const d = new Date(+p[2], +p[1] - 1, +p[0]);
+    return isNaN(d) ? "" : (dias[d.getDay()] || "");
+  }
+  // Fecha con su día de la semana adelante: "Lunes 10/11/2026". Si no es una
+  // fecha válida, devuelve el texto tal cual.
+  function fechaConDia(f) {
+    const dia = diaSemanaNombre(f);
+    return dia ? (dia + " " + f) : (f || "");
   }
 
   function renderAdminTardanzas(records) {
@@ -4224,7 +4232,7 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div>
               <div class="s-nombre">${pm.empleado}</div>
-              <div class="s-dir">${tipoPermisoLabel(pm.tipo)} · ${pm.servicio} · ${pm.fecha} · ${hora24(pm.hora)}${pm.motivo ? " · " + pm.motivo : ""}</div>
+              <div class="s-dir">${tipoPermisoLabel(pm.tipo)} · ${pm.servicio} · ${fechaConDia(pm.fecha)} · ${hora24(pm.hora)}${pm.motivo ? " · " + pm.motivo : ""}</div>
             </div>
             ${vacEstadoBadge(pm.estado)}
           </div>
@@ -4278,7 +4286,7 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div>
               <div class="s-nombre">${v.empleado}</div>
-              <div class="s-dir">${tipoLicenciaLabel(v.tipo)} · ${v.desde} → ${v.hasta} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
+              <div class="s-dir">${tipoLicenciaLabel(v.tipo)} · ${fechaConDia(v.desde)} → ${fechaConDia(v.hasta)} · ${v.dias} ${v.dias == 1 ? "día" : "días"}</div>
             </div>
             ${vacEstadoBadge(v.estado)}
           </div>
@@ -4318,7 +4326,7 @@
     if (!(SERVICIOS[v.empleado] || []).length) return `<div class="hist-empty" style="padding:8px 0;">Este empleado no tiene servicios propios.</div>`;
     const dows = weekdaysEnRango(v.desde, v.hasta);
     const servicios = (SERVICIOS[v.empleado] || []).filter(s => servicioAfectado(s, dows));
-    if (!servicios.length) return `<div class="hist-empty" style="padding:8px 0;">No tiene turnos en los días de esta licencia (${v.desde} → ${v.hasta}).</div>`;
+    if (!servicios.length) return `<div class="hist-empty" style="padding:8px 0;">No tiene turnos en los días de esta licencia (${fechaConDia(v.desde)} → ${fechaConDia(v.hasta)}).</div>`;
     const otros = Object.keys(SERVICIOS).filter(e => e !== v.empleado);
     return servicios.map(s => {
       const cob = (adminCoberturasCache || []).find(c => c.vacacionId === v.id && c.servicio === s.nombre);
@@ -4348,7 +4356,7 @@
     const rec = (adminVacacionesCache || []).find(r => r.id === id);
     // Mensaje real según el tipo de la solicitud (no siempre es "vacaciones").
     const tipo  = (rec && rec.tipo) ? rec.tipo : "Vacaciones";
-    const quien = rec ? ` de ${rec.empleado} (${rec.desde} → ${rec.hasta})` : "";
+    const quien = rec ? ` de ${rec.empleado} (${fechaConDia(rec.desde)} → ${fechaConDia(rec.hasta)})` : "";
     if (!confirm(`¿Seguro que querés ${txt} esta solicitud de ${tipo.toLowerCase()}${quien}?`)) return;
     // Optimista: cambio el estado local y re-pinto ya (al aceptar aparecen los
     // selectores de suplente sin esperar la recarga).
@@ -4408,7 +4416,7 @@
   function renderAusenciaRow(r) {
     return `<div class="mat-item" style="flex-direction:column;align-items:stretch;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div><div class="mat-nombre">${r.fecha} · ${r.servicio}</div>
+        <div><div class="mat-nombre">${fechaConDia(r.fecha)} · ${r.servicio}</div>
              <div class="mat-fecha">${r.motivo ? "📝 " + r.motivo : "— sin motivo del empleado —"}</div></div>
         ${ausenciaBadge(r.clasificacion)}
       </div>
@@ -4506,7 +4514,7 @@
          <button class="btn-mini btn-anular" onclick="resolverTE('${r.id}','Anulada')">🗑️ Anular</button>`;
     return `<div class="mat-item" style="flex-direction:column;align-items:stretch;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div><div class="mat-nombre">${r.fecha} · ${r.servicio}</div>
+        <div><div class="mat-nombre">${fechaConDia(r.fecha)} · ${r.servicio}</div>
              <div class="mat-fecha">${hora24(r.entrada)} → ${hora24(r.salida)} · <b>+${fmtMinutos(r.minutos)}</b> extra</div></div>
         ${teBadge(r.estado)}
       </div>
@@ -4738,7 +4746,7 @@
       }).join("");
       return `
         <div class="hist-day">
-          <div class="hist-day-label">${r.servicio} · ${r.fecha} ${hora24(r.hora)}</div>
+          <div class="hist-day-label">${r.servicio} · ${fechaConDia(r.fecha)} ${hora24(r.hora)}</div>
           <div style="padding:6px 0;">${chips || "<span class='hr-hora'>sin ítems</span>"}</div>
           ${r.observaciones ? `<div class="hr-hora">📝 ${r.observaciones}</div>` : ""}
           <div class="hr-hora">👤 ${r.supervisor}${r.linkGPS && r.linkGPS !== "No disponible" ? ` · <a href="${r.linkGPS}" target="_blank">📍 ubicación</a>` : ""}</div>
@@ -4981,7 +4989,7 @@
   // Nota "arranca dd/mm/yyyy" si el servicio todavía no está vigente.
   function notaAlta(desde) {
     return (desde && !servicioActivoHoy({ desde }))
-      ? `<span class="badge badge-extra" style="margin-left:6px;">arranca ${desde}</span>` : "";
+      ? `<span class="badge badge-extra" style="margin-left:6px;">arranca ${fechaConDia(desde)}</span>` : "";
   }
 
   // Nota "⏸️ en pausa" para un servicio pausado (oculto al empleado, visible
@@ -5306,7 +5314,7 @@
       const pasado = dmyToInt(r.fecha) < hoyInt;
       return `
       <div class="hist-day"${pasado ? ' style="opacity:.6;"' : ""}>
-        <div class="hist-day-label">🏗️ ${r.fecha} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}</div>
+        <div class="hist-day-label">🏗️ ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}</div>
         <div class="hist-row">
           <div>
             <div class="hr-serv">📍 ${r.direccion}</div>
@@ -5386,7 +5394,7 @@
             <div class="hist-row">
               <div>
                 <div class="hr-serv">🏠 Depto ${d.depto} · <span style="color:#c2410c;font-weight:700;">Solicitado</span></div>
-                <div class="hr-hora">📅 ${s.fecha} · 🕒 ${horario}</div>
+                <div class="hr-hora">📅 ${fechaConDia(s.fecha)} · 🕒 ${horario}</div>
                 <div class="hr-hora">🧹 ${s.tareas.join(", ")}</div>
                 ${s.nota ? `<div class="hr-hora">📝 ${s.nota}</div>` : ""}
               </div>
@@ -5527,8 +5535,8 @@
         <div class="hist-row salida">
           <div>
             <div class="hr-serv">🏠 Depto ${s.depto} · ${s.edificio}</div>
-            <div class="hr-hora">📅 ${s.fecha} · 🕒 ${horario} · 🧹 ${s.tareas.join(", ")}</div>
-            <div class="hr-hora">✅ Hecho${s.fechaHecho ? " · " + s.fechaHecho : ""}${s.hechoPor ? " · " + s.hechoPor : ""}</div>
+            <div class="hr-hora">📅 ${fechaConDia(s.fecha)} · 🕒 ${horario} · 🧹 ${s.tareas.join(", ")}</div>
+            <div class="hr-hora">✅ Hecho${s.fechaHecho ? " · " + fechaConDia(s.fechaHecho) : ""}${s.hechoPor ? " · " + s.hechoPor : ""}</div>
           </div>
         </div>`;
     }).join("");
@@ -5662,7 +5670,7 @@
     if (pr.estado === "disponible") return "disponible";
     const o = MAT_ESTADOS.find(x => x.v === pr.estado);
     const lbl = o ? o.label : pr.estado;
-    return `${lbl}${pr.cantidad ? " · " + pr.cantidad + " u." : ""}${pr.fecha ? " · " + pr.fecha : ""}`;
+    return `${lbl}${pr.cantidad ? " · " + pr.cantidad + " u." : ""}${pr.fecha ? " · " + fechaConDia(pr.fecha) : ""}`;
   }
 
   // Cada producto con su estado en un dropdown + cantidad; un solo "Guardar
