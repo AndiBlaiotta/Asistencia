@@ -4641,11 +4641,23 @@
   // por empleado/período y descargar como CSV (lo que esté filtrado).
   // ---------- SUPERVISIONES (admin) ----------
   let adminSupervisionesCache = null;
+  let supSemanaSel = "actual"; // "actual" | "all" | clave de lunes "yyyymmdd"
 
   function openAdminSupervisiones() {
+    supSemanaSel = "actual";
     adminShowStep("supervisiones");
     loadAdminSupervisiones();
   }
+
+  // Clave de la semana (lunes) para comparar/seleccionar.
+  function semanaKey(d) {
+    const l = lunesSemana(d);
+    return "" + l.getFullYear() + pad2(l.getMonth() + 1) + pad2(l.getDate());
+  }
+  function finDeSemana(lun) { const f = new Date(lun); f.setDate(lun.getDate() + 6); return f; }
+  function fmtDiaMes(d) { return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1); }
+
+  function onSupSemana(v) { supSemanaSel = v; renderAdminSupervisiones(); }
 
   async function loadAdminSupervisiones() {
     const el = document.getElementById("admin-supervisiones");
@@ -4668,24 +4680,57 @@
   function renderAdminSupervisiones() {
     const el = document.getElementById("admin-supervisiones");
     const records = (adminSupervisionesCache && adminSupervisionesCache.records) || [];
-    const lun = lunesSemana(new Date());
-    const estaSemana = {};
-    records.forEach(r => { const d = dmyToDate(r.fecha); if (d && d >= lun) estaSemana[r.servicio] = true; });
+
+    // Semanas presentes en los registros (lunes) + siempre la semana actual.
+    const lunActual = lunesSemana(new Date());
+    const semanas = {}; // clave -> Date (lunes)
+    semanas[semanaKey(lunActual)] = lunActual;
+    records.forEach(r => { const d = dmyToDate(r.fecha); if (d) { const l = lunesSemana(d); semanas[semanaKey(l)] = l; } });
+    const claves = Object.keys(semanas).sort().reverse(); // más reciente arriba
+    const claveActual = semanaKey(lunActual);
+    const todas = supSemanaSel === "all";
+    const claveSel = (supSemanaSel === "actual") ? claveActual : supSemanaSel;
+
+    // Selector de semana.
+    const selectHtml = `
+      <label for="sup-semana-sel">Semana</label>
+      <select id="sup-semana-sel" onchange="onSupSemana(this.value)">
+        <option value="all"${todas ? " selected" : ""}>Todas las semanas</option>
+        ${claves.map(k => {
+          const l = semanas[k], f = finDeSemana(l);
+          const sel = (!todas && k === claveSel) ? " selected" : "";
+          return `<option value="${k}"${sel}>Semana ${fmtDiaMes(l)}–${fmtDiaMes(f)}${k === claveActual ? " (actual)" : ""}</option>`;
+        }).join("")}
+      </select>`;
+
+    // Visitas a mostrar según la semana elegida.
+    const lunVer = todas ? null : (semanas[claveSel] || lunActual);
+    const finVer = lunVer ? finDeSemana(lunVer) : null;
+    const recordsVer = todas ? records : records.filter(r => {
+      const d = dmyToDate(r.fecha); return d && d >= lunVer && d <= finVer;
+    });
+
+    // Resumen de "faltan visitar": siempre de una semana concreta (la elegida, o
+    // la actual si está en "Todas").
+    const lunF = lunVer || lunActual, finF = finDeSemana(lunF);
+    const visitadosSemana = {};
+    records.forEach(r => { const d = dmyToDate(r.fecha); if (d && d >= lunF && d <= finF) visitadosSemana[r.servicio] = true; });
     const servicios = serviciosSupervisables();
-    const faltantes = servicios.filter(s => !estaSemana[s.nombre]);
+    const faltantes = servicios.filter(s => !visitadosSemana[s.nombre]);
+    const rotuloSemana = `Semana ${fmtDiaMes(lunF)}–${fmtDiaMes(finF)}`;
 
-    const faltHtml = `
-      <div class="filtro-total">Esta semana: <b>${servicios.length - faltantes.length}</b> visitados · <b>${faltantes.length}</b> pendientes</div>
+    const faltHtml = selectHtml + `
+      <div class="filtro-total">${rotuloSemana}: <b>${servicios.length - faltantes.length}</b> visitados · <b>${faltantes.length}</b> pendientes</div>
       ${faltantes.length
-        ? `<div class="hist-row salida"><div><div class="hr-serv">🔴 Faltan visitar esta semana</div><div class="hr-hora">${faltantes.map(s => s.nombre).join(", ")}</div></div></div>`
-        : `<div class="hist-row"><div><div class="hr-serv">✅ Todos visitados esta semana</div></div></div>`}`;
+        ? `<div class="hist-row salida"><div><div class="hr-serv">🔴 Faltan visitar esa semana</div><div class="hr-hora">${faltantes.map(s => s.nombre).join(", ")}</div></div></div>`
+        : `<div class="hist-row"><div><div class="hr-serv">✅ Todos visitados esa semana</div></div></div>`}`;
 
-    if (!records.length) {
-      el.innerHTML = faltHtml + `<div class="hist-empty">Todavía no hay visitas registradas.</div>`;
+    if (!recordsVer.length) {
+      el.innerHTML = faltHtml + `<div class="hist-empty">${todas ? "Todavía no hay visitas registradas." : "Sin visitas en esa semana."}</div>`;
       return;
     }
 
-    const visitasHtml = records.map(r => {
+    const visitasHtml = recordsVer.map(r => {
       const items = r.items || {};
       const chips = Object.keys(items).map(k => {
         const c = nivelColor(items[k]);
