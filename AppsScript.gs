@@ -895,7 +895,7 @@ const HORARIOS = {
     "Mitre":      { 2: ["08:00", "12:00"], 4: ["08:00", "12:00"], 6: ["08:00", "12:00"] },
     "Santa Rosa": { 1: ["08:00", "12:00"], 3: ["08:00", "12:00"], 5: ["08:00", "12:00"] },
     "Mercedes":   { 1: ["12:30", "14:30"], 3: ["12:30", "14:30"], 5: ["12:30", "14:30"] },
-    "Jonte":      { 2: ["12:30", "16:30"], 4: ["12:30", "16:30"] }
+    "Jonte":      { 2: ["12:45", "16:30"], 4: ["12:45", "16:30"] }
   },
   "Alejandro Jelvez": {
     "San Martín":   { 1: ["16:00", "18:00"], 3: ["16:00", "18:00"], 5: ["16:00", "18:00"] },
@@ -1793,8 +1793,42 @@ function serviciosConocidos() {
   return set;
 }
 
+// One-shot (2026-11-10): Jonte (Rebeca Ayala) pasó de 12:30 a 12:45 los Mar/Jue.
+// Recalcula la/s Entrada/s de HOY que se guardaron con la referencia vieja (12:30)
+// usando el nuevo inicio (12:45): si ya no es tarde, pasa a "A tiempo" y limpia el
+// motivo. Corre una sola vez (flag en Script Properties). Se puede borrar después.
+function recalcTardanzaJonteUnaVez_() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty("RECALC_JONTE_1245") === "done") return;
+  try {
+    const EMP = "Rebeca Ayala", SERV = "Jonte", FECHA = "10/11/2026",
+          INICIO = "12:45", TOL = 10;
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EMP);
+    if (sheet && sheet.getLastRow() > 1) {
+      const n = sheet.getLastRow() - 1;
+      const data = sheet.getRange(2, 1, n, HEADERS.length).getValues();
+      const refMin = Number(INICIO.split(":")[0]) * 60 + Number(INICIO.split(":")[1]);
+      data.forEach(function (row, i) {
+        if (fmtCell(row[0]) !== FECHA) return;
+        if ((row[1] || "").toString() !== SERV) return;
+        if ((row[3] || "").toString() !== "Entrada") return;
+        const hm = /^(\d{1,2}):(\d{2})/.exec(normalizarHora24(fmtCell(row[4])));
+        if (!hm) return;
+        const diff = (Number(hm[1]) * 60 + Number(hm[2])) - refMin;
+        const estado = diff > TOL ? ("Tarde " + diff + " min") : "A tiempo";
+        const fila = i + 2;
+        sheet.getRange(fila, 10).setNumberFormat("@").setValue(estado);
+        if (diff <= TOL) sheet.getRange(fila, 11).setNumberFormat("@").setValue(""); // ya no es tarde: sin motivo
+      });
+    }
+    invalidarReportes();
+  } catch (err) { /* no romper doGet por el recálculo */ }
+  props.setProperty("RECALC_JONTE_1245", "done");
+}
+
 function doGet(e) {
   const p = e.parameter || {};
+  recalcTardanzaJonteUnaVez_();
 
   // ---- LOGIN: solo valida credenciales, no escribe nada ----
   // Devuelve el rol para que el cliente sepa qué pantalla mostrar.
