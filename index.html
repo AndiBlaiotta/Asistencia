@@ -1391,7 +1391,11 @@
   // Servicios que se muestran en la pestaña Registrar para el empleado actual:
   // los suyos (ya vigentes) + Horas Extras/Suplencias + los que está cubriendo hoy.
   function serviciosRegistro() {
-    return [...serviciosDe(currentUser).filter(servicioActivoHoy),
+    // El "Final de obra" genérico (carga manual de dirección) se saca de la lista:
+    // ahora se ficha SOLO desde el evento que agenda el admin (finalesHoyCards),
+    // que ya trae dirección y horario y aparece únicamente el día pactado.
+    return [...serviciosDe(currentUser).filter(servicioActivoHoy)
+              .filter(s => !(s.custom && s.nombre === "Final de obra")),
             ...coberturasActivas.map(servicioCubiertoObj),
             ...finalesHoyCards()];
   }
@@ -1493,14 +1497,16 @@
     el.style.display = "block";
   }
 
-  // Tarjetas de Final de obra de HOY para fichar (dirección ya cargada). Se
-  // suman a la lista de servicios del día del evento. Es un servicio "libre"
-  // (servicio = "Final de obra"): sin validación de día/horario ni tardanza.
+  // Tarjetas de Final de obra de HOY para fichar: funcionan como un servicio más
+  // (dirección fija del evento + horario pactado). Solo aparecen el día del evento
+  // (así queda atado a la fecha pactada) y marcan tardanza contra el inicio pactado.
+  // El empleado NO carga datos: ficha desde el botón del evento.
   function finalesHoyCards() {
     const hoy = fechaDMY(new Date());
+    const dow = new Date().getDay();
     return misFinalesList.filter(f => f.fecha === hoy).map(f => ({
       nombre: "Final de obra", dir: f.direccion,
-      horario: { texto: `${hora24(f.inicio)}–${hora24(f.fin)}` },
+      horario: { texto: `${hora24(f.inicio)}–${hora24(f.fin)}`, starts: { [dow]: hora24(f.inicio) } },
       evento: true, eventoId: f.id
     }));
   }
