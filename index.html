@@ -3201,12 +3201,12 @@
   const _filtros = {}; // id -> { state, render }
 
   function _filtroEntry(id) {
-    if (!_filtros[id]) _filtros[id] = { state: { emp: "", periodo: "all", desde: "", hasta: "" }, render: null };
+    if (!_filtros[id]) _filtros[id] = { state: { emp: "", periodo: "all", desde: "", hasta: "", dow: "" }, render: null };
     return _filtros[id];
   }
   function filtroState(id) { return _filtroEntry(id).state; }
   function registrarFiltroRender(id, render) { _filtroEntry(id).render = render; }
-  function resetFiltro(id) { Object.assign(filtroState(id), { emp: "", periodo: "all", desde: "", hasta: "" }); }
+  function resetFiltro(id) { Object.assign(filtroState(id), { emp: "", periodo: "all", desde: "", hasta: "", dow: "" }); }
 
   // Cambio de cualquier control: vuelca el DOM al estado y re-renderiza.
   function onFiltroChange(id) {
@@ -3217,6 +3217,7 @@
     const per = val("-per");   if (per   !== null) st.periodo = per;
     const des = val("-desde"); if (des   !== null) st.desde = des;
     const has = val("-hasta"); if (has   !== null) st.hasta = has;
+    const dow = val("-dow");   if (dow   !== null) st.dow = dow;
     if (f.render) f.render();
   }
 
@@ -3263,18 +3264,35 @@
           </div>
         </div>`;
     }
+    // Día de la semana (opcional): solo en las búsquedas de fichadas. Orden
+    // Lunes→Domingo; value = nº getDay() (0=Dom..6=Sáb), "" = todos.
+    if (opts.dow) {
+      const ordenDow = [1, 2, 3, 4, 5, 6, 0];
+      if (st.dow !== "" && ordenDow.indexOf(+st.dow) === -1) st.dow = "";
+      html += `
+        <label for="${id}-dow">Día de la semana</label>
+        <select id="${id}-dow" onchange="onFiltroChange('${id}')">
+          <option value="">Todos los días</option>
+          ${ordenDow.map(n => `<option value="${n}"${String(n) === String(st.dow) ? " selected" : ""}>${DIAS_SEMANA[n]}</option>`).join("")}
+        </select>`;
+    }
     return `<div class="filtro-bar">${html}</div>`;
   }
 
-  // Filtra records (con .fecha "d/M/yyyy") por el período del estado.
+  // Filtra records (con .fecha "d/M/yyyy") por el período y, si está activo, por
+  // día de la semana (st.dow = nº getDay(); "" = todos). El dow aplica a cualquier
+  // vista cuyo filtro lo exponga; en el resto st.dow queda "" y no afecta.
   function filtrarPeriodo(records, st) {
+    let out = records;
     if (st.periodo === "rango") {
       const d = st.desde ? +st.desde.replace(/-/g, "") : -Infinity;
       const h = st.hasta ? +st.hasta.replace(/-/g, "") :  Infinity;
-      return records.filter(r => { const k = fechaKey(r.fecha); return k >= d && k <= h; });
+      out = out.filter(r => { const k = fechaKey(r.fecha); return k >= d && k <= h; });
+    } else if (st.periodo !== "all") {
+      out = out.filter(r => mesKey(r.fecha) === st.periodo);
     }
-    if (st.periodo !== "all") return records.filter(r => mesKey(r.fecha) === st.periodo);
-    return records;
+    if (st.dow !== "" && st.dow != null) out = out.filter(r => diaSemanaNum(r.fecha) === +st.dow);
+    return out;
   }
   // Filtra por empleado y período juntos (records con .empleado y .fecha).
   function filtrarEmpPeriodo(records, st) {
@@ -3282,17 +3300,20 @@
     return filtrarPeriodo(rec, st);
   }
 
-  // Etiqueta legible del período elegido (para títulos/resúmenes).
+  // Etiqueta legible del período elegido (para títulos/resúmenes). Si hay un día
+  // de la semana filtrado, lo agrega al final ("… · solo los Lunes").
   function periodoLabel(st) {
-    if (st.periodo === "all") return "desde el inicio";
-    if (st.periodo === "rango") {
+    let base;
+    if (st.periodo === "all") base = "desde el inicio";
+    else if (st.periodo === "rango") {
       const f = iso => iso ? iso.split("-").reverse().join("/") : "";
-      if (st.desde && st.hasta) return `${f(st.desde)} a ${f(st.hasta)}`;
-      if (st.desde) return `desde ${f(st.desde)}`;
-      if (st.hasta) return `hasta ${f(st.hasta)}`;
-      return "período personalizado";
-    }
-    return mesLabel(st.periodo);
+      base = (st.desde && st.hasta) ? `${f(st.desde)} a ${f(st.hasta)}`
+           : st.desde ? `desde ${f(st.desde)}`
+           : st.hasta ? `hasta ${f(st.hasta)}`
+           : "período personalizado";
+    } else base = mesLabel(st.periodo);
+    if (st.dow !== "" && st.dow != null) base += ` · solo los ${DIAS_SEMANA[+st.dow]}`;
+    return base;
   }
 
   async function loadAdminResumen(forzar) {
@@ -3321,7 +3342,7 @@
 
     const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
     const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
-    const selectorHtml = filtroBarHtml("res", st, { empleados, meses: mesesDeRecords(recEmp) });
+    const selectorHtml = filtroBarHtml("res", st, { empleados, meses: mesesDeRecords(recEmp), dow: true });
 
     const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}desde el inicio: `
       + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "registro" : "registros"}</div>`;
@@ -3623,7 +3644,7 @@
     registrarFiltroRender("fich", () => renderAdminRegistros(records, mostrarDir));
     const st = filtroState("fich");
     // Solo período (el empleado y el servicio ya están fijos en esta vista).
-    const selectorHtml = filtroBarHtml("fich", st, { meses: mesesDeRecords(records) });
+    const selectorHtml = filtroBarHtml("fich", st, { meses: mesesDeRecords(records), dow: true });
     const totalHtml = `<div class="filtro-total">Total desde el inicio: `
       + `<b>${records.length}</b> ${records.length === 1 ? "registro" : "registros"}</div>`;
 
@@ -3638,7 +3659,7 @@
 
     el.innerHTML = selectorHtml + totalHtml + Object.entries(grupos).map(([fecha, regs]) => `
       <div class="hist-day">
-        <div class="hist-day-label">${fecha}</div>
+        <div class="hist-day-label">${fechaConDia(fecha)}</div>
         ${regs.map(r => `
           <div class="hist-row ${r.tipo.toLowerCase()}">
             <div>
@@ -3899,13 +3920,18 @@
   }
 
   // Nombre del día de la semana a partir de "d/M/yyyy" (formato es-AR).
-  function diaSemanaNombre(fecha) {
-    // Tolera "dd/mm/yyyy" y también "dd/mm/yyyy HH:mm" (toma la parte de fecha).
+  const DIAS_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  // Día de la semana (0=Domingo..6=Sábado) de "dd/mm/yyyy" (tolera "… HH:mm");
+  // -1 si no es una fecha válida.
+  function diaSemanaNum(fecha) {
     const p = (fecha || "").toString().trim().split(" ")[0].split("/");
-    if (p.length !== 3) return "";
-    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    if (p.length !== 3) return -1;
     const d = new Date(+p[2], +p[1] - 1, +p[0]);
-    return isNaN(d) ? "" : (dias[d.getDay()] || "");
+    return isNaN(d) ? -1 : d.getDay();
+  }
+  function diaSemanaNombre(fecha) {
+    const n = diaSemanaNum(fecha);
+    return n < 0 ? "" : DIAS_SEMANA[n];
   }
   // Fecha con su día de la semana adelante: "Lunes 10/11/2026". Si no es una
   // fecha válida, devuelve el texto tal cual.
@@ -3926,7 +3952,7 @@
     // ---- Barra de filtros: empleado + período ----
     const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
     const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
-    const selectorHtml = filtroBarHtml("tard", st, { empleados, meses: mesesDeRecords(recEmp) });
+    const selectorHtml = filtroBarHtml("tard", st, { empleados, meses: mesesDeRecords(recEmp), dow: true });
 
     const filtrado = !!st.emp;
 
@@ -4082,7 +4108,7 @@
     // Barra de filtros: empleado + período.
     const empleados = [...new Set(records.map(r => r.empleado))].sort((a, b) => a.localeCompare(b));
     const recEmp = st.emp ? records.filter(r => r.empleado === st.emp) : records;
-    const selectorHtml = filtroBarHtml("sg", st, { empleados, meses: mesesDeRecords(recEmp) });
+    const selectorHtml = filtroBarHtml("sg", st, { empleados, meses: mesesDeRecords(recEmp), dow: true });
 
     const totalHtml = `<div class="filtro-total">Total ${st.emp ? st.emp + " · " : ""}desde el inicio: `
       + `<b>${recEmp.length}</b> ${recEmp.length === 1 ? "registro" : "registros"}</div>`;
