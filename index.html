@@ -3341,7 +3341,7 @@
       const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
       return `
       <div class="hist-day">
-        <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "registro" : "registros"}</div>
+        <div class="hist-day-label">${fechaConDia(fecha)} · ${regs.length} ${regs.length === 1 ? "registro" : "registros"}</div>
         ${regs.map(r => `
           <div class="hist-row ${(r.tipo || "").toLowerCase()}">
             <div>
@@ -4102,7 +4102,7 @@
       const regs = grupos[fecha].slice().sort((a, b) => horaKey(a.hora) - horaKey(b.hora));
       return `
       <div class="hist-day">
-        <div class="hist-day-label">${fecha} · ${regs.length} ${regs.length === 1 ? "registro" : "registros"}</div>
+        <div class="hist-day-label">${fechaConDia(fecha)} · ${regs.length} ${regs.length === 1 ? "registro" : "registros"}</div>
         ${regs.map(r => `
           <div class="hist-row ${(r.tipo || "").toLowerCase()}">
             <div>
