@@ -956,6 +956,7 @@
     <input type="text" id="fo-nota" placeholder="Ej: llevar hidrolavadora">
     <label>Empleados asignados</label>
     <div id="fo-empleados"></div>
+    <div id="fo-conflictos"></div>
     <button class="btn btn-primary" id="fo-submit" onclick="crearFinalObra()">🏗️ Programar Final de obra</button>
     <button class="btn btn-cambiar" id="fo-cancel" onclick="cancelarEdicionFinal()" style="display:none;">Cancelar edición</button>
     <div id="fo-msg" style="margin-top:6px;font-size:13px;"></div>
@@ -5238,6 +5239,86 @@
   // ---------- FINALES DE OBRA (admin) ----------
   let adminFinalesCache = null;
   let finalObraEditId = null; // id del final de obra en edición (null = alta nueva)
+  let foConflictSig = "";     // firma (empleados+fecha) del panel de conflictos mostrado
+  let foPrefillResol = {};    // "titular||servicio" -> valor del <select> (prefill al editar)
+
+  // Servicios REGULARES que cada empleado elegido tiene ese día (según
+  // SERVICIOS.starts), excluyendo pausados. Son los que un Final de obra pisaría
+  // y que el admin tiene que reasignar/justificar antes de guardar.
+  function finalObraConflictos(empleados, fechaDMY) {
+    const dow = diaSemanaNum(fechaDMY);
+    if (dow < 0) return [];
+    const out = [];
+    empleados.forEach(emp => {
+      (SERVICIOS[emp] || []).forEach(s => {
+        if (s.pausado) return;
+        const starts = s.horario && s.horario.starts;
+        if (starts && starts[dow]) {
+          out.push({ empleado: emp, servicio: s.nombre, inicio: starts[dow],
+                     texto: (s.horario && s.horario.texto) || ("desde " + starts[dow]) });
+        }
+      });
+    });
+    return out;
+  }
+
+  function foConflictoSig(empleados, fechaDMY) {
+    return fechaDMY + "|" + empleados.slice().sort().join(",");
+  }
+
+  // Dibuja el panel: por cada servicio en conflicto, un <select> con las 3
+  // opciones (titular / justificar / reasignar a cada otro empleado).
+  function renderFinalConflictos(conflictos, empleados) {
+    const cont = document.getElementById("fo-conflictos");
+    if (!conflictos.length) { cont.innerHTML = ""; return; }
+    const multi = empleados.length > 1;
+    const empsTodos = Object.keys(SERVICIOS).sort((a, b) => a.localeCompare(b));
+    cont.innerHTML = `
+      <div style="border:1px solid #f59e0b;background:rgba(245,158,11,.08);border-radius:10px;padding:12px;margin:12px 0;">
+        <div style="font-weight:700;color:#b45309;margin-bottom:8px;">⚠️ Ese día ya hay servicios asignados. Decidí qué pasa con cada uno (es obligatorio):</div>
+        ${conflictos.map(c => {
+          const otros = empsTodos.filter(e => e !== c.empleado);
+          const key = c.empleado + "||" + c.servicio;
+          const pre = foPrefillResol[key] || "";
+          const opt = (v, lbl) => `<option value="${v}"${v === pre ? " selected" : ""}>${lbl}</option>`;
+          return `
+          <div style="margin-bottom:10px;">
+            <div style="font-weight:600;font-size:13px;">${multi ? c.empleado + " · " : ""}${c.servicio}
+              <span style="color:var(--gray);font-weight:400;"> · ${c.texto}</span></div>
+            <select class="fo-conflict-sel" data-key="${key}" style="margin-top:4px;">
+              ${opt("", "— Elegí qué hacer —")}
+              ${opt("titular", "Lo hace el titular igual")}
+              ${opt("justificar", "No se hace (justificado)")}
+              <optgroup label="Reasignar a:">
+                ${otros.map(e => opt("re:" + e, e)).join("")}
+              </optgroup>
+            </select>
+          </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  // Lee el panel: arma la lista de resoluciones y avisa si falta alguna.
+  function leerFinalResoluciones() {
+    const sels = document.querySelectorAll("#fo-conflictos .fo-conflict-sel");
+    const list = []; let incompleto = false;
+    sels.forEach(sel => {
+      const parts = sel.getAttribute("data-key").split("||");
+      const empleado = parts[0], servicio = parts[1], v = sel.value;
+      if (!v) { incompleto = true; return; }
+      if (v === "titular")          list.push({ empleado, servicio, accion: "titular" });
+      else if (v === "justificar")  list.push({ empleado, servicio, accion: "justificar" });
+      else if (v.indexOf("re:") === 0) list.push({ empleado, servicio, accion: "reasignar", suplente: v.slice(3) });
+    });
+    return { list, incompleto };
+  }
+
+  function limpiarConflictosFinal() {
+    foConflictSig = "";
+    foPrefillResol = {};
+    const cont = document.getElementById("fo-conflictos");
+    if (cont) cont.innerHTML = "";
+  }
 
   function openAdminFinales() {
     adminShowStep("finales");
@@ -5272,10 +5353,11 @@
     document.getElementById("fo-submit").textContent = "🏗️ Programar Final de obra";
     document.getElementById("fo-cancel").style.display = "none";
     renderFinalesEmpleadosChecks();
+    limpiarConflictosFinal();
   }
 
   // Carga un final de obra existente en el formulario para editarlo.
-  function editarFinalObra(id) {
+  async function editarFinalObra(id) {
     const r = (adminFinalesCache || []).find(x => x.id === id);
     if (!r) return;
     finalObraEditId = id;
@@ -5288,6 +5370,17 @@
     document.getElementById("fo-submit").textContent = "💾 Guardar cambios";
     document.getElementById("fo-cancel").style.display = "";
     renderFinalesEmpleadosChecks(r.empleados || []);
+    limpiarConflictosFinal();
+    // Precarga las reasignaciones ya guardadas de este Final (coberturas fo:) para
+    // que, al reabrir el panel de conflictos, aparezcan con su opción elegida.
+    try {
+      const j = await fetchJson({ action: "adminCoberturas", admin: currentUser, hash: currentHash });
+      if (j.status === "ok" && j.records) {
+        j.records.filter(c => c.vacacionId === "fo:" + id).forEach(c => {
+          foPrefillResol[c.titular + "||" + c.servicio] = c.suplente ? ("re:" + c.suplente) : "justificar";
+        });
+      }
+    } catch (e) { /* sin prefill: el admin vuelve a elegir */ }
     document.getElementById("admin-step-finales").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -5303,6 +5396,34 @@
     if (!inicio || !fin)  { msg.className = "error"; msg.textContent = "Poné horario desde y hasta."; return; }
     if (!dir)             { msg.className = "error"; msg.textContent = "Poné la dirección."; return; }
     if (!empleados.length){ msg.className = "error"; msg.textContent = "Elegí al menos un empleado."; return; }
+
+    // ¿Alguno de los elegidos tiene servicios regulares ese día? Hay que
+    // reasignarlos/justificarlos antes de guardar (no se puede dejar pendiente).
+    let resolucionesJSON = "";
+    const conflictos = finalObraConflictos(empleados, fecha);
+    const cont = document.getElementById("fo-conflictos");
+    if (conflictos.length) {
+      const sig = foConflictoSig(empleados, fecha);
+      const panelVigente = sig === foConflictSig && cont.querySelector(".fo-conflict-sel");
+      if (!panelVigente) {
+        // Primer aviso para este set de conflictos: mostrar el panel y frenar.
+        renderFinalConflictos(conflictos, empleados);
+        foConflictSig = sig;
+        msg.className = "error";
+        msg.textContent = "⚠️ Resolvé los servicios de abajo y volvé a tocar el botón.";
+        cont.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      const res = leerFinalResoluciones();
+      if (res.incompleto) {
+        msg.className = "error";
+        msg.textContent = "Te falta resolver algún servicio en conflicto.";
+        cont.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      resolucionesJSON = JSON.stringify(res.list);
+    }
+
     msg.className = "success"; msg.textContent = "Guardando...";
     const editando = !!finalObraEditId;
     try {
@@ -5312,6 +5433,7 @@
         fecha, inicio, fin, direccion: dir, nota,
         empleados: empleados.join("|")
       };
+      if (resolucionesJSON) params.resoluciones = resolucionesJSON;
       if (editando) params.id = finalObraEditId;
       const j = await fetchJson(params);
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }

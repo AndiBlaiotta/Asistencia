@@ -1135,6 +1135,23 @@ function detectarAusencias(empleado) {
     });
   }
 
+  // Coberturas donde este empleado es TITULAR: ese servicio, en ese rango de
+  // fechas, lo cubre un suplente (o se justificó sin cubrir, suplente vacío). En
+  // cualquier caso el titular NO falta. Cubre tanto vacaciones como los Finales de
+  // obra que reasignaron un servicio (coberturas fo:). Mapa servicio -> [[d,h]].
+  const cubierto = {};
+  const csheet = getCoberturasSheet();
+  if (csheet.getLastRow() > 1) {
+    const cc = csheet.getRange(2, 1, csheet.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
+    cc.forEach(r => {
+      if ((r[3] || "").toString() !== empleado) return; // col Titular
+      const serv = (r[2] || "").toString();
+      const d = fechaAInt(r[5]), h = fechaAInt(r[6]);
+      if (isNaN(d) || isNaN(h)) return;
+      (cubierto[serv] = cubierto[serv] || []).push([d, h]);
+    });
+  }
+
   // Ausencias ya registradas del empleado: set "servicio|fechaInt".
   // De paso, limpiar las que quedaron mal cargadas ANTES del alta de un servicio
   // (ej. un servicio nuevo que retroactivamente marcó faltas viejas). Se borran
@@ -1172,6 +1189,8 @@ function detectarAusencias(empleado) {
       if (servicioPausado(empleado, servicio)) return; // servicio en pausa: no genera faltas
       const desdeServ = servicioDesdeInt(empleado, servicio);
       if (!isNaN(desdeServ) && fi < desdeServ) return; // antes del alta del servicio
+      const rangos = cubierto[servicio];           // cubierto/reasignado ese día: no falta
+      if (rangos && rangos.some(rg => fi >= rg[0] && fi <= rg[1])) return;
       const key = servicio + "|" + fi;
       if (entradaSet[key]) return;                 // fichó: presente
       if (existentes[key]) return;                 // ya registrada
@@ -1316,6 +1335,98 @@ function empleadoHorarioEfectivo(empleado, servicio, fecha) {
   if ((HORARIOS[empleado] || {})[servicio]) return empleado;
   const cob = coberturaActiva(empleado, servicio, fecha);
   return cob ? cob.titular : empleado;
+}
+
+// ---- Conflictos de agenda (Final de obra que pisa servicios regulares) ----
+// Servicios REGULARES que un empleado tiene en una fecha puntual (según HORARIOS,
+// por día de la semana), excluyendo los pausados y los anteriores al alta del
+// servicio. Devuelve [{ servicio, inicio, fin }]. Base para avisar al admin que,
+// si le programa algo ese día, esos servicios quedarían pendientes.
+function serviciosRegularesEnFecha(empleado, fechaDMY) {
+  const servHor = HORARIOS[empleado];
+  if (!servHor) return [];
+  const dow = diaDeSemana(fechaDMY);
+  const fi  = fechaAInt(fechaDMY);
+  if (isNaN(dow)) return [];
+  const out = [];
+  Object.keys(servHor).forEach(servicio => {
+    const slot = servHor[servicio][dow];
+    if (!slot) return;
+    if (servicioPausado(empleado, servicio)) return;
+    const desde = servicioDesdeInt(empleado, servicio);
+    if (!isNaN(desde) && !isNaN(fi) && fi < desde) return;
+    out.push({ servicio, inicio: slot[0], fin: slot[1] });
+  });
+  return out;
+}
+
+// Prefijo que marca una cobertura originada por un Final de obra (en la columna
+// VacacionID de la hoja Coberturas). Así se distinguen de las de vacaciones y se
+// pueden limpiar cuando el Final de obra se edita o borra.
+const COBERTURA_FO_PREFIX = "fo:";
+
+// Borra todas las coberturas (filas de la hoja Coberturas) originadas por un
+// Final de obra dado. Se llama al editar (para recrearlas) y al eliminar.
+function borrarCoberturasDeFinal(finalId) {
+  const cs = getCoberturasSheet();
+  const last = cs.getLastRow();
+  if (last <= 1) return;
+  const tag = COBERTURA_FO_PREFIX + finalId;
+  const vac = cs.getRange(2, 2, last - 1, 1).getValues().flat(); // col VacacionID
+  for (let i = vac.length - 1; i >= 0; i--) {
+    if ((vac[i] || "").toString() === tag) cs.deleteRow(i + 2);
+  }
+}
+
+// Aplica las resoluciones de conflictos de un Final de obra: por cada servicio
+// regular que el empleado tenía ese día, el admin eligió reasignar (a un
+// suplente), justificar (nadie lo hace, pero no es falta) o dejárselo al titular.
+// Valida que TODOS los conflictos estén resueltos (Andi: no se puede dejar nada
+// pendiente). `resoluciones` = [{ empleado, servicio, accion, suplente }].
+// accion ∈ "reasignar" | "justificar" | "titular". Crea coberturas de 1 día
+// (Desde=Hasta=fecha) marcadas con fo:<finalId>; "justificar" = suplente vacío;
+// "titular" = no crea nada. Devuelve { ok } o { error }.
+function aplicarResolucionesFinal(finalId, fechaDMY, empleados, resoluciones) {
+  // Mapa de resoluciones por "empleado||servicio".
+  const resMap = {};
+  (resoluciones || []).forEach(r => {
+    resMap[(r.empleado || "") + "||" + (r.servicio || "")] = r;
+  });
+  // Junta todos los conflictos reales y valida que cada uno tenga resolución.
+  const aCrear = []; // filas de cobertura a insertar
+  for (let i = 0; i < empleados.length; i++) {
+    const emp = empleados[i];
+    const conflictos = serviciosRegularesEnFecha(emp, fechaDMY);
+    for (let j = 0; j < conflictos.length; j++) {
+      const serv = conflictos[j].servicio;
+      const r = resMap[emp + "||" + serv];
+      if (!r || !r.accion) {
+        return { error: "Falta resolver el servicio \"" + serv + "\" de " + emp + "." };
+      }
+      if (r.accion === "titular") continue;              // lo hace el titular: nada
+      if (r.accion === "justificar") {
+        aCrear.push([emp, serv, ""]);                    // suplente vacío
+      } else if (r.accion === "reasignar") {
+        const sup = (r.suplente || "").toString();
+        if (!esEmpleado(sup)) return { error: "Suplente inválido para \"" + serv + "\"." };
+        if (sup === emp)      return { error: "El suplente no puede ser el mismo empleado (" + serv + ")." };
+        aCrear.push([emp, serv, sup]);
+      } else {
+        return { error: "Acción inválida para \"" + serv + "\"." };
+      }
+    }
+  }
+  // Recién acá escribe (ya validado todo). Limpia las previas de este Final.
+  borrarCoberturasDeFinal(finalId);
+  if (aCrear.length) {
+    const cs  = getCoberturasSheet();
+    const tag = COBERTURA_FO_PREFIX + finalId;
+    const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+    const filas = aCrear.map(c => [Utilities.getUuid().slice(0, 8), tag, c[1], c[0], c[2], fechaDMY, fechaDMY, now]);
+    const start = cs.getLastRow() + 1;
+    cs.getRange(start, 1, filas.length, COBERTURAS_HEADERS.length).setNumberFormat("@").setValues(filas);
+  }
+  return { ok: true };
 }
 
 // ---- Feriados nacionales (dd/MM/yyyy) ----
@@ -3006,8 +3117,17 @@ function doGet(e) {
       for (let i = 0; i < empleados.length; i++) {
         if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
       }
+      let resoluciones = [];
+      if (p.resoluciones) {
+        try { resoluciones = JSON.parse(p.resoluciones) || []; }
+        catch (e) { return jsonOut({ status: "error", message: "Resoluciones inválidas" }); }
+      }
       const fs  = getFinalesSheet();
       const id  = Utilities.getUuid().slice(0, 8);
+      // Resuelve/valida los conflictos ANTES de escribir el Final (las coberturas
+      // solo se crean si todo está resuelto). Si falta algo, no se guarda nada.
+      const rc = aplicarResolucionesFinal(id, p.fecha, empleados, resoluciones);
+      if (rc.error) return jsonOut({ status: "error", message: rc.error });
       const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
       const row = fs.getLastRow() + 1;
       fs.getRange(row, 1, 1, FINALES_HEADERS.length).setNumberFormat("@")
@@ -3060,12 +3180,21 @@ function doGet(e) {
       for (let i = 0; i < empleados.length; i++) {
         if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
       }
+      let resoluciones = [];
+      if (p.resoluciones) {
+        try { resoluciones = JSON.parse(p.resoluciones) || []; }
+        catch (e) { return jsonOut({ status: "error", message: "Resoluciones inválidas" }); }
+      }
       const fs = getFinalesSheet();
       const last = fs.getLastRow();
       if (last <= 1) return jsonOut({ status: "error", message: "No hay finales de obra" });
       const ids = fs.getRange(2, 1, last - 1, 1).getValues().flat();
       const idx = ids.findIndex(v => (v || "").toString() === p.id);
       if (idx === -1) return jsonOut({ status: "error", message: "No encontrado" });
+      // Revalida/reasigna conflictos (recrea las coberturas fo: de este Final)
+      // ANTES de sobrescribir la fila. Si falta resolver algo, no se guarda.
+      const rc = aplicarResolucionesFinal(p.id, p.fecha, empleados, resoluciones);
+      if (rc.error) return jsonOut({ status: "error", message: rc.error });
       // Sobrescribe fecha/inicio/fin/direccion/empleados/nota (cols 2–7);
       // conserva el id (col 1) y la fecha de creación (col 8).
       fs.getRange(idx + 2, 2, 1, 6).setNumberFormat("@")
@@ -3090,6 +3219,7 @@ function doGet(e) {
       const idx = ids.findIndex(v => (v || "").toString() === p.id);
       if (idx === -1) return jsonOut({ status: "error", message: "No encontrado" });
       fs.deleteRow(idx + 2);
+      borrarCoberturasDeFinal(p.id); // limpia las reasignaciones de este Final
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
