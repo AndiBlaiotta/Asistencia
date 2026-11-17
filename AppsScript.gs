@@ -2877,11 +2877,17 @@ function doGet(e) {
   }
 
   // ---- ADMIN: asignar un suplente a un servicio de una licencia aceptada ----
-  if (p.action === "asignarCobertura" && p.vacacionId && p.servicio && p.suplente) {
+  // Asigna un suplente a un servicio de una licencia aceptada, O lo deja LIBRE
+  // (sin cubrir) si viene p.libre: en ese caso se guarda una cobertura con
+  // suplente vacío. "Dejar libre" documenta que ese servicio no se cubre durante
+  // la licencia (el titular ya está exento de falta por estar de vacaciones).
+  if (p.action === "asignarCobertura" && p.vacacionId && p.servicio && (p.suplente || p.libre)) {
     if (!checkAdmin(p.admin, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
-    if (!esEmpleado(p.suplente)) return jsonOut({ status: "error", message: "Suplente inválido" });
+    const libre = !p.suplente && !!p.libre;
+    const suplente = libre ? "" : p.suplente.toString();
+    if (!libre && !esEmpleado(suplente)) return jsonOut({ status: "error", message: "Suplente inválido" });
     if (!serviciosConocidos()[p.servicio]) return jsonOut({ status: "error", message: "Servicio inválido" });
     try {
       const vs = getVacacionesSheet();
@@ -2893,21 +2899,21 @@ function doGet(e) {
         return jsonOut({ status: "error", message: "La vacación no está aceptada" });
       }
       const titular = v[1], desde = v[2], hasta = v[3];
-      if (p.suplente === titular) {
+      if (!libre && suplente === titular) {
         return jsonOut({ status: "error", message: "El suplente no puede ser el mismo empleado" });
       }
       const cs = getCoberturasSheet();
       if (cs.getLastRow() > 1) {
         const cdata = cs.getRange(2, 1, cs.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues();
         if (cdata.some(r => (r[1] || "").toString() === p.vacacionId && (r[2] || "").toString() === p.servicio)) {
-          return jsonOut({ status: "error", message: "Ese servicio ya tiene un suplente asignado" });
+          return jsonOut({ status: "error", message: "Ese servicio ya tiene una opción asignada" });
         }
       }
       const id  = Utilities.getUuid().slice(0, 8);
       const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
       const row = cs.getLastRow() + 1;
       cs.getRange(row, 1, 1, COBERTURAS_HEADERS.length).setNumberFormat("@")
-        .setValues([[id, p.vacacionId, p.servicio, titular, p.suplente, desde, hasta, now]]);
+        .setValues([[id, p.vacacionId, p.servicio, titular, suplente, desde, hasta, now]]);
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });

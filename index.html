@@ -4364,9 +4364,10 @@
     return servicios.map(s => {
       const cob = (adminCoberturasCache || []).find(c => c.vacacionId === v.id && c.servicio === s.nombre);
       if (cob) {
+        const estado = cob.suplente ? `🔁 Cubre: ${cob.suplente}` : `🔓 Dejado libre (sin cubrir)`;
         return `<div class="mat-item comprado">
           <div><div class="mat-nombre">${s.nombre}</div>
-               <div class="mat-fecha comprado">🔁 Cubre: ${cob.suplente}</div></div>
+               <div class="mat-fecha comprado">${estado}</div></div>
           <button class="btn-mini btn-anular" onclick="quitarCob('${cob.id}')">Quitar</button>
         </div>`;
       }
@@ -4375,11 +4376,14 @@
         <div style="flex:1;min-width:0;">
           <div class="mat-nombre">${s.nombre}</div>
           <select id="${selId}" style="margin-top:6px;">
-            <option value="">-- Asignar suplente --</option>
-            ${otros.map(e => `<option value="${e}">${e}</option>`).join("")}
+            <option value="">-- Elegí qué hacer --</option>
+            <option value="__libre__">Dejar libre (sin cubrir)</option>
+            <optgroup label="Asignar suplente:">
+              ${otros.map(e => `<option value="${e}">${e}</option>`).join("")}
+            </optgroup>
           </select>
         </div>
-        <button class="btn-mini btn-pedir" onclick="asignarCob('${v.id}','${encodeURIComponent(s.nombre)}','${selId}')">Asignar</button>
+        <button class="btn-mini btn-pedir" onclick="asignarCob('${v.id}','${encodeURIComponent(s.nombre)}','${selId}')">Guardar</button>
       </div>`;
     }).join("");
   }
@@ -4404,10 +4408,13 @@
 
   async function asignarCob(vacId, servEnc, selId) {
     const servicio = decodeURIComponent(servEnc);
-    const suplente = document.getElementById(selId).value;
-    if (!suplente) { alert("Elegí un empleado para asignar."); return; }
-    const j = await fetchJson({ action: "asignarCobertura", admin: currentUser, hash: currentHash, vacacionId: vacId, servicio, suplente });
-    if (j.status !== "ok") { alert(j.message || "No se pudo asignar."); return; }
+    const val = document.getElementById(selId).value;
+    if (!val) { alert("Elegí una opción."); return; }
+    const params = { action: "asignarCobertura", admin: currentUser, hash: currentHash, vacacionId: vacId, servicio };
+    if (val === "__libre__") params.libre = "1";
+    else params.suplente = val;
+    const j = await fetchJson(params);
+    if (j.status !== "ok") { alert(j.message || "No se pudo guardar."); return; }
     loadAdminVacaciones();
   }
 
