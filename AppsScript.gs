@@ -56,7 +56,12 @@ const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente
 // cargan (anticipado) y el día del evento le aparece una tarjeta para fichar con
 // la dirección ya cargada. Empleados = lista separada por " | ".
 const FINALES_SHEET   = "Finales de obra";
-const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleados", "Nota", "Creado"];
+const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleados", "Nota", "Creado", "Tipo"];
+// Tipos de evento que se agendan desde la misma pantalla. El "Tipo" (col 9) es el
+// NOMBRE del servicio con que se ficha (debe estar en SERVICIOS_LIBRES). Filas
+// viejas sin tipo = "Final de obra". El Final de obra se ficha SOLO desde el evento;
+// la Suplencia fuera de TRAPO además deja disponible el botón manual libre.
+const EVENTO_TIPOS = ["Final de obra", "Suplencias de servicios fuera de TRAPO"];
 
 // ---- Clientes / Limpieza de departamentos temporarios (2026-11-06) ----
 // Una clienta administra deptos temporarios en un edificio. Por cada depto hace
@@ -1237,6 +1242,10 @@ function getFinalesSheet() {
     sheet.getRange(1, 1, 1, FINALES_HEADERS.length)
       .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
     sheet.setFrozenRows(1);
+  } else if (!sheet.getRange(1, 9).getValue()) {
+    // Hoja preexistente sin la columna "Tipo": la rotula una sola vez.
+    sheet.getRange(1, 9).setValue("Tipo")
+      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
   }
   return sheet;
 }
@@ -3123,6 +3132,8 @@ function doGet(e) {
       for (let i = 0; i < empleados.length; i++) {
         if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
       }
+      const tipo = (p.tipo || "Final de obra").toString();
+      if (EVENTO_TIPOS.indexOf(tipo) === -1) return jsonOut({ status: "error", message: "Tipo de evento inválido" });
       let resoluciones = [];
       if (p.resoluciones) {
         try { resoluciones = JSON.parse(p.resoluciones) || []; }
@@ -3130,7 +3141,7 @@ function doGet(e) {
       }
       const fs  = getFinalesSheet();
       const id  = Utilities.getUuid().slice(0, 8);
-      // Resuelve/valida los conflictos ANTES de escribir el Final (las coberturas
+      // Resuelve/valida los conflictos ANTES de escribir el evento (las coberturas
       // solo se crean si todo está resuelto). Si falta algo, no se guarda nada.
       const rc = aplicarResolucionesFinal(id, p.fecha, empleados, resoluciones);
       if (rc.error) return jsonOut({ status: "error", message: rc.error });
@@ -3138,7 +3149,7 @@ function doGet(e) {
       const row = fs.getLastRow() + 1;
       fs.getRange(row, 1, 1, FINALES_HEADERS.length).setNumberFormat("@")
         .setValues([[id, p.fecha, inicio, fin, direccion, empleados.join(" | "),
-                     (p.nota || "").toString().trim(), now]]);
+                     (p.nota || "").toString().trim(), now, tipo]]);
       return jsonOut({ status: "ok", id });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
@@ -3157,7 +3168,7 @@ function doGet(e) {
       const records = data.map(r => ({
         id: r[0], fecha: r[1], inicio: r[2], fin: r[3], direccion: r[4],
         empleados: (r[5] || "").toString().split("|").map(s => s.trim()).filter(Boolean),
-        nota: r[6]
+        nota: r[6], tipo: (r[8] || "Final de obra").toString()
       }));
       records.sort((a, b) => fechaAInt(b.fecha) - fechaAInt(a.fecha));
       return jsonOut({ status: "ok", records });
@@ -3186,6 +3197,8 @@ function doGet(e) {
       for (let i = 0; i < empleados.length; i++) {
         if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
       }
+      const tipo = (p.tipo || "Final de obra").toString();
+      if (EVENTO_TIPOS.indexOf(tipo) === -1) return jsonOut({ status: "error", message: "Tipo de evento inválido" });
       let resoluciones = [];
       if (p.resoluciones) {
         try { resoluciones = JSON.parse(p.resoluciones) || []; }
@@ -3193,19 +3206,20 @@ function doGet(e) {
       }
       const fs = getFinalesSheet();
       const last = fs.getLastRow();
-      if (last <= 1) return jsonOut({ status: "error", message: "No hay finales de obra" });
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay eventos programados" });
       const ids = fs.getRange(2, 1, last - 1, 1).getValues().flat();
       const idx = ids.findIndex(v => (v || "").toString() === p.id);
       if (idx === -1) return jsonOut({ status: "error", message: "No encontrado" });
-      // Revalida/reasigna conflictos (recrea las coberturas fo: de este Final)
+      // Revalida/reasigna conflictos (recrea las coberturas fo: de este evento)
       // ANTES de sobrescribir la fila. Si falta resolver algo, no se guarda.
       const rc = aplicarResolucionesFinal(p.id, p.fecha, empleados, resoluciones);
       if (rc.error) return jsonOut({ status: "error", message: rc.error });
-      // Sobrescribe fecha/inicio/fin/direccion/empleados/nota (cols 2–7);
-      // conserva el id (col 1) y la fecha de creación (col 8).
+      // Sobrescribe fecha/inicio/fin/direccion/empleados/nota (cols 2–7) y tipo
+      // (col 9); conserva el id (col 1) y la fecha de creación (col 8).
       fs.getRange(idx + 2, 2, 1, 6).setNumberFormat("@")
         .setValues([[p.fecha, inicio, fin, direccion, empleados.join(" | "),
                      (p.nota || "").toString().trim()]]);
+      fs.getRange(idx + 2, 9).setNumberFormat("@").setValue(tipo);
       return jsonOut({ status: "ok", id: p.id });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
@@ -3253,6 +3267,7 @@ function doGet(e) {
         if (!isNaN(fInt) && !isNaN(hoyInt) && fInt < hoyInt) return; // ya pasó
         records.push({
           id: r[0], fecha: r[1], inicio: r[2], fin: r[3], direccion: r[4], nota: r[6],
+          tipo: (r[8] || "Final de obra").toString(),
           companeros: empleados.filter(e => e !== p.empleado)
         });
       });

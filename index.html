@@ -819,7 +819,7 @@
     <button class="btn btn-primary admin-main-btn" onclick="openAdminHorasAsignadas()" style="margin-bottom:8px;">🕐 Horas asignadas</button>
 
     <!-- Finales de obra (directo) -->
-    <button class="btn btn-primary admin-main-btn" onclick="openAdminFinales()" style="margin-bottom:8px;">🏗️ Finales de obra</button>
+    <button class="btn btn-primary admin-main-btn" onclick="openAdminFinales()" style="margin-bottom:8px;">🗓️ Eventos (Finales / Suplencias)</button>
 
     <!-- Clientes / deptos temporarios (directo) -->
     <button class="btn btn-primary admin-main-btn" onclick="openAdminClientes()" style="margin-bottom:18px;">🏢 Clientes (deptos)</button>
@@ -932,8 +932,13 @@
   <!-- FINALES DE OBRA: programar un evento (fecha/hora/dirección) y asignarlo a empleados -->
   <div id="admin-step-finales" style="display:none;">
     <button class="btn btn-cambiar" onclick="adminBackEmpleados()">↩ Volver</button>
-    <div class="section-title" style="margin-top:16px;">🏗️ Programar un Final de obra</div>
+    <div class="section-title" style="margin-top:16px;">🗓️ Programar un evento</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:10px;">Cargá fecha, horario y dirección, y elegí a los empleados. Lo van a ver apenas lo guardes; el día del evento les aparece listo para fichar.</div>
+    <label for="fo-tipo">Tipo de evento</label>
+    <select id="fo-tipo" onchange="onFinalTipoChange()">
+      <option value="Final de obra">🏗️ Final de obra</option>
+      <option value="Suplencias de servicios fuera de TRAPO">🧭 Suplencia fuera de TRAPO</option>
+    </select>
     <label>Fecha (dd/mm/aaaa)</label>
     <div class="hora-sel">
       <select id="fo-dia"></select><span>/</span>
@@ -957,10 +962,10 @@
     <label>Empleados asignados</label>
     <div id="fo-empleados"></div>
     <div id="fo-conflictos"></div>
-    <button class="btn btn-primary" id="fo-submit" onclick="crearFinalObra()">🏗️ Programar Final de obra</button>
+    <button class="btn btn-primary" id="fo-submit" onclick="crearFinalObra()">🗓️ Programar evento</button>
     <button class="btn btn-cambiar" id="fo-cancel" onclick="cancelarEdicionFinal()" style="display:none;">Cancelar edición</button>
     <div id="fo-msg" style="margin-top:6px;font-size:13px;"></div>
-    <div class="section-title" style="margin-top:22px;">Finales de obra cargados</div>
+    <div class="section-title" style="margin-top:22px;">Eventos cargados</div>
     <button class="btn-refresh" onclick="loadAdminFinales()">🔄 Actualizar</button>
     <div id="admin-finales-list"></div>
   </div>
@@ -1481,20 +1486,20 @@
     if (!misFinalesList.length) { el.style.display = "none"; el.innerHTML = ""; return; }
     const hoy = fechaDMY(new Date());
     const items = misFinalesList.map(f => {
-      const dm = (f.fecha || "").split("/").slice(0, 2).join("/");  // dd/mm
+      const info = eventoTipoInfo(f.tipo);
       const esHoy = f.fecha === hoy;
       const comp = (f.companeros && f.companeros.length)
         ? `<div style="color:#0a2540;font-size:12px;margin-top:2px;">👥 Con: ${f.companeros.join(", ")}</div>` : "";
       const nota = f.nota
         ? `<div style="color:#0a2540;font-size:12px;margin-top:2px;">📝 ${f.nota}</div>` : "";
       return `<div style="padding:8px 10px;border-radius:10px;background:#fff4e6;border:1px solid #f3cf9a;margin-bottom:8px;">
-        <div style="font-weight:700;color:#0a2540;">🏗️ Final de obra${esHoy ? ` <span style="color:#c2410c;">· ¡HOY!</span>` : ""}</div>
+        <div style="font-weight:700;color:#0a2540;">${info.icon} ${info.label}${esHoy ? ` <span style="color:#c2410c;">· ¡HOY!</span>` : ""}</div>
         <div style="color:#0a2540;font-size:13px;margin-top:2px;">📅 ${fechaConDia(f.fecha)} · 🕒 ${hora24(f.inicio)}–${hora24(f.fin)}</div>
         <div style="color:#0071A8;font-weight:700;font-size:13px;margin-top:2px;">📍 ${f.direccion}</div>
         ${comp}${nota}
       </div>`;
     }).join("");
-    el.innerHTML = `<div class="section-title">🏗️ Finales de obra programados</div>${items}`;
+    el.innerHTML = `<div class="section-title">🗓️ Eventos programados</div>${items}`;
     el.style.display = "block";
   }
 
@@ -1505,8 +1510,10 @@
   function finalesHoyCards() {
     const hoy = fechaDMY(new Date());
     const dow = new Date().getDay();
+    // El nombre de la tarjeta = tipo del evento (Final de obra o Suplencia fuera
+    // de TRAPO): así la fichada va al servicio libre que corresponde.
     return misFinalesList.filter(f => f.fecha === hoy).map(f => ({
-      nombre: "Final de obra", dir: f.direccion,
+      nombre: f.tipo || "Final de obra", dir: f.direccion,
       horario: { texto: `${hora24(f.inicio)}–${hora24(f.fin)}`, starts: { [dow]: hora24(f.inicio) } },
       evento: true, eventoId: f.id
     }));
@@ -5327,6 +5334,21 @@
     if (cont) cont.innerHTML = "";
   }
 
+  // Presentación por tipo de evento programado. El `tipo` es también el nombre
+  // del servicio con que se ficha (debe estar en SERVICIOS_EXTRA/SERVICIOS_LIBRES).
+  function eventoTipoInfo(tipo) {
+    return tipo === "Suplencias de servicios fuera de TRAPO"
+      ? { icon: "🧭", label: "Suplencia fuera de TRAPO" }
+      : { icon: "🏗️", label: "Final de obra" };
+  }
+  // Adapta el texto del botón al tipo elegido (solo en alta nueva; en edición
+  // queda "Guardar cambios").
+  function onFinalTipoChange() {
+    if (finalObraEditId) return;
+    const info = eventoTipoInfo(document.getElementById("fo-tipo").value);
+    document.getElementById("fo-submit").textContent = `${info.icon} Programar ${info.label}`;
+  }
+
   function openAdminFinales() {
     adminShowStep("finales");
     cancelarEdicionFinal();
@@ -5357,10 +5379,11 @@
     document.getElementById("fo-dir").value    = "";
     document.getElementById("fo-nota").value   = "";
     document.getElementById("fo-msg").textContent = "";
-    document.getElementById("fo-submit").textContent = "🏗️ Programar Final de obra";
+    document.getElementById("fo-tipo").value   = "Final de obra";
     document.getElementById("fo-cancel").style.display = "none";
     renderFinalesEmpleadosChecks();
     limpiarConflictosFinal();
+    onFinalTipoChange();
   }
 
   // Carga un final de obra existente en el formulario para editarlo.
@@ -5373,6 +5396,7 @@
     llenarHoraSelect("fo-fin-h", "fo-fin-m", hora24(r.fin));
     document.getElementById("fo-dir").value    = r.direccion || "";
     document.getElementById("fo-nota").value   = r.nota || "";
+    document.getElementById("fo-tipo").value   = r.tipo || "Final de obra";
     document.getElementById("fo-msg").textContent = "";
     document.getElementById("fo-submit").textContent = "💾 Guardar cambios";
     document.getElementById("fo-cancel").style.display = "";
@@ -5431,13 +5455,14 @@
       resolucionesJSON = JSON.stringify(res.list);
     }
 
+    const tipo = document.getElementById("fo-tipo").value;
     msg.className = "success"; msg.textContent = "Guardando...";
     const editando = !!finalObraEditId;
     try {
       const params = {
         action: editando ? "adminEditarFinalObra" : "adminCrearFinalObra",
         admin: currentUser, hash: currentHash,
-        fecha, inicio, fin, direccion: dir, nota,
+        fecha, inicio, fin, direccion: dir, nota, tipo,
         empleados: empleados.join("|")
       };
       if (resolucionesJSON) params.resoluciones = resolucionesJSON;
@@ -5448,7 +5473,7 @@
       cancelarEdicionFinal();
       const msg2 = document.getElementById("fo-msg");
       msg2.className = "success";
-      msg2.textContent = editando ? "✅ Cambios guardados." : "✅ Final de obra programado.";
+      msg2.textContent = editando ? "✅ Cambios guardados." : `✅ ${eventoTipoInfo(tipo).label} programado.`;
       loadAdminFinales();
     } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
   }
@@ -5469,13 +5494,14 @@
   function renderAdminFinales() {
     const el = document.getElementById("admin-finales-list");
     const recs = adminFinalesCache || [];
-    if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay finales de obra cargados.</div>`; return; }
+    if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay eventos cargados.</div>`; return; }
     const hoyInt = dmyToInt(fechaDMY(new Date()));
     el.innerHTML = recs.map(r => {
       const pasado = dmyToInt(r.fecha) < hoyInt;
+      const info = eventoTipoInfo(r.tipo);
       return `
       <div class="hist-day"${pasado ? ' style="opacity:.6;"' : ""}>
-        <div class="hist-day-label">🏗️ ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}</div>
+        <div class="hist-day-label">${info.icon} ${info.label} · ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}</div>
         <div class="hist-row">
           <div>
             <div class="hr-serv">📍 ${r.direccion}</div>
@@ -5492,7 +5518,7 @@
   }
 
   async function eliminarFinalObra(id) {
-    if (!confirm("¿Eliminar este Final de obra? Dejará de verlo el empleado.")) return;
+    if (!confirm("¿Eliminar este evento? Dejará de verlo el empleado.")) return;
     const j = await fetchJson({ action: "adminEliminarFinalObra", admin: currentUser, hash: currentHash, id });
     if (j.status !== "ok") { alert(j.message || "No se pudo eliminar."); return; }
     adminFinalesCache = null;
