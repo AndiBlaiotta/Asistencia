@@ -56,7 +56,7 @@ const COBERTURAS_HEADERS = ["ID", "VacacionID", "Servicio", "Titular", "Suplente
 // cargan (anticipado) y el día del evento le aparece una tarjeta para fichar con
 // la dirección ya cargada. Empleados = lista separada por " | ".
 const FINALES_SHEET   = "Finales de obra";
-const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleados", "Nota", "Creado", "Tipo"];
+const FINALES_HEADERS = ["ID", "Fecha", "Inicio", "Fin", "Dirección", "Empleados", "Nota", "Creado", "Tipo", "SerieID"];
 // Tipos de evento que se agendan desde la misma pantalla. El "Tipo" (col 9) es el
 // NOMBRE del servicio con que se ficha (debe estar en SERVICIOS_LIBRES). Filas
 // viejas sin tipo = "Final de obra". El Final de obra se ficha SOLO desde el evento;
@@ -1242,10 +1242,16 @@ function getFinalesSheet() {
     sheet.getRange(1, 1, 1, FINALES_HEADERS.length)
       .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
     sheet.setFrozenRows(1);
-  } else if (!sheet.getRange(1, 9).getValue()) {
-    // Hoja preexistente sin la columna "Tipo": la rotula una sola vez.
-    sheet.getRange(1, 9).setValue("Tipo")
-      .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+  } else {
+    // Hoja preexistente: rotula las columnas nuevas una sola vez (Tipo, SerieID).
+    if (!sheet.getRange(1, 9).getValue()) {
+      sheet.getRange(1, 9).setValue("Tipo")
+        .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    }
+    if (!sheet.getRange(1, 10).getValue()) {
+      sheet.getRange(1, 10).setValue("SerieID")
+        .setBackground("#4f46e5").setFontColor("white").setFontWeight("bold");
+    }
   }
   return sheet;
 }
@@ -1395,14 +1401,15 @@ function borrarCoberturasDeFinal(finalId) {
 // accion ∈ "reasignar" | "justificar" | "titular". Crea coberturas de 1 día
 // (Desde=Hasta=fecha) marcadas con fo:<finalId>; "justificar" = suplente vacío;
 // "titular" = no crea nada. Devuelve { ok } o { error }.
-function aplicarResolucionesFinal(finalId, fechaDMY, empleados, resoluciones) {
-  // Mapa de resoluciones por "empleado||servicio".
+// Valida (SIN escribir) que todos los conflictos de esa fecha tengan resolución.
+// Devuelve { error } o { ok, aCrear:[[emp,serv,suplente],...] } (coberturas a crear;
+// suplente vacío = justificado; "titular" = no genera fila).
+function validarResolucionesFinal(fechaDMY, empleados, resoluciones) {
   const resMap = {};
   (resoluciones || []).forEach(r => {
     resMap[(r.empleado || "") + "||" + (r.servicio || "")] = r;
   });
-  // Junta todos los conflictos reales y valida que cada uno tenga resolución.
-  const aCrear = []; // filas de cobertura a insertar
+  const aCrear = [];
   for (let i = 0; i < empleados.length; i++) {
     const emp = empleados[i];
     const conflictos = serviciosRegularesEnFecha(emp, fechaDMY);
@@ -1410,7 +1417,7 @@ function aplicarResolucionesFinal(finalId, fechaDMY, empleados, resoluciones) {
       const serv = conflictos[j].servicio;
       const r = resMap[emp + "||" + serv];
       if (!r || !r.accion) {
-        return { error: "Falta resolver el servicio \"" + serv + "\" de " + emp + "." };
+        return { error: "Falta resolver el servicio \"" + serv + "\" de " + emp + " (" + fechaDMY + ")." };
       }
       if (r.accion === "titular") continue;              // lo hace el titular: nada
       if (r.accion === "justificar") {
@@ -1425,9 +1432,14 @@ function aplicarResolucionesFinal(finalId, fechaDMY, empleados, resoluciones) {
       }
     }
   }
-  // Recién acá escribe (ya validado todo). Limpia las previas de este Final.
+  return { ok: true, aCrear };
+}
+
+// Escribe las coberturas de un evento para UNA fecha (Desde=Hasta=fecha), tras
+// limpiar las previas de ese evento. `aCrear` viene de validarResolucionesFinal.
+function escribirCoberturasFinal(finalId, fechaDMY, aCrear) {
   borrarCoberturasDeFinal(finalId);
-  if (aCrear.length) {
+  if (aCrear && aCrear.length) {
     const cs  = getCoberturasSheet();
     const tag = COBERTURA_FO_PREFIX + finalId;
     const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
@@ -1435,7 +1447,36 @@ function aplicarResolucionesFinal(finalId, fechaDMY, empleados, resoluciones) {
     const start = cs.getLastRow() + 1;
     cs.getRange(start, 1, filas.length, COBERTURAS_HEADERS.length).setNumberFormat("@").setValues(filas);
   }
+}
+
+// Valida + aplica (escribe) las resoluciones de un evento de UNA fecha.
+function aplicarResolucionesFinal(finalId, fechaDMY, empleados, resoluciones) {
+  const v = validarResolucionesFinal(fechaDMY, empleados, resoluciones);
+  if (v.error) return { error: v.error };
+  escribirCoberturasFinal(finalId, fechaDMY, v.aCrear);
   return { ok: true };
+}
+
+// Fechas "dd/MM/yyyy" del rango [desde, hasta] cuyo día de la semana está en
+// diasSet (set de getDay 0..6). Hasta `cap` fechas (seguridad). Vacío si el rango
+// es inválido o no cae ningún día.
+function fechasDeRango(desdeDMY, hastaDMY, diasSet, cap) {
+  const a = fechaADate(desdeDMY), b = fechaADate(hastaDMY);
+  if (!a || !b || a > b) return [];
+  const tz = Session.getScriptTimeZone();
+  const out = [];
+  const d = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const end = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  let guard = 0;
+  while (d <= end && guard < 1000) {
+    if (diasSet[d.getDay()]) {
+      out.push(Utilities.formatDate(d, tz, "dd/MM/yyyy"));
+      if (cap && out.length >= cap) break;
+    }
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  return out;
 }
 
 // ---- Feriados nacionales (dd/MM/yyyy) ----
@@ -3149,8 +3190,97 @@ function doGet(e) {
       const row = fs.getLastRow() + 1;
       fs.getRange(row, 1, 1, FINALES_HEADERS.length).setNumberFormat("@")
         .setValues([[id, p.fecha, inicio, fin, direccion, empleados.join(" | "),
-                     (p.nota || "").toString().trim(), now, tipo]]);
+                     (p.nota || "").toString().trim(), now, tipo, ""]]);
       return jsonOut({ status: "ok", id });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: crear un evento REPETIDO en un rango de fechas ----
+  // Expande [desde, hasta] por los días de la semana elegidos (p.dias = CSV de
+  // getDay 0..6) y crea un evento por cada fecha, todos con el mismo SerieID.
+  // Las resoluciones de conflictos (por empleado+servicio) se aplican a cada
+  // fecha donde ese servicio aparezca. Valida TODAS las fechas antes de escribir.
+  if (p.action === "adminCrearFinalObraRango" && p.desde && p.hasta && p.direccion && p.empleados && p.dias) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      if (isNaN(fechaAInt(p.desde)) || isNaN(fechaAInt(p.hasta))) {
+        return jsonOut({ status: "error", message: "Rango de fechas inválido" });
+      }
+      const inicio = (p.inicio || "").toString().trim();
+      const fin    = (p.fin || "").toString().trim();
+      const reHora = /^\d{1,2}:\d{2}$/;
+      if (!reHora.test(inicio) || !reHora.test(fin)) {
+        return jsonOut({ status: "error", message: "Horario inválido (usá HH:MM)" });
+      }
+      const direccion = (p.direccion || "").toString().trim();
+      if (!direccion) return jsonOut({ status: "error", message: "Falta la dirección" });
+      const empleados = (p.empleados || "").toString().split("|").map(s => s.trim()).filter(Boolean);
+      if (!empleados.length) return jsonOut({ status: "error", message: "Elegí al menos un empleado" });
+      for (let i = 0; i < empleados.length; i++) {
+        if (!esEmpleado(empleados[i])) return jsonOut({ status: "error", message: "Empleado inválido: " + empleados[i] });
+      }
+      const tipo = (p.tipo || "Final de obra").toString();
+      if (EVENTO_TIPOS.indexOf(tipo) === -1) return jsonOut({ status: "error", message: "Tipo de evento inválido" });
+      const diasSet = {};
+      (p.dias || "").toString().split(",").forEach(d => { const n = parseInt(d, 10); if (n >= 0 && n <= 6) diasSet[n] = true; });
+      if (!Object.keys(diasSet).length) return jsonOut({ status: "error", message: "Elegí al menos un día de la semana" });
+      let resoluciones = [];
+      if (p.resoluciones) {
+        try { resoluciones = JSON.parse(p.resoluciones) || []; }
+        catch (e) { return jsonOut({ status: "error", message: "Resoluciones inválidas" }); }
+      }
+      const fechas = fechasDeRango(p.desde, p.hasta, diasSet, 150);
+      if (!fechas.length) return jsonOut({ status: "error", message: "No hay fechas en ese rango con esos días" });
+      // Pre-valida TODAS las fechas (sin escribir): si falta resolver algo, aborta.
+      for (let i = 0; i < fechas.length; i++) {
+        const v = validarResolucionesFinal(fechas[i], empleados, resoluciones);
+        if (v.error) return jsonOut({ status: "error", message: v.error });
+      }
+      // Todo válido: crea la serie (eventos + coberturas por fecha).
+      const fs  = getFinalesSheet();
+      const serieId = Utilities.getUuid().slice(0, 8);
+      const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+      const nota = (p.nota || "").toString().trim();
+      const empStr = empleados.join(" | ");
+      const filas = [];
+      for (let i = 0; i < fechas.length; i++) {
+        const eventId = Utilities.getUuid().slice(0, 8);
+        const v = validarResolucionesFinal(fechas[i], empleados, resoluciones);
+        escribirCoberturasFinal(eventId, fechas[i], v.aCrear);
+        filas.push([eventId, fechas[i], inicio, fin, direccion, empStr, nota, now, tipo, serieId]);
+      }
+      const start = fs.getLastRow() + 1;
+      fs.getRange(start, 1, filas.length, FINALES_HEADERS.length).setNumberFormat("@").setValues(filas);
+      return jsonOut({ status: "ok", serieId, creados: fechas.length });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- ADMIN: eliminar TODA una serie (todas sus fechas + coberturas) ----
+  if (p.action === "adminEliminarSerie" && p.serieId) {
+    if (!checkAdmin(p.admin, p.hash)) {
+      return jsonOut({ status: "error", message: "No autorizado" });
+    }
+    try {
+      const fs = getFinalesSheet();
+      const last = fs.getLastRow();
+      if (last <= 1) return jsonOut({ status: "error", message: "No hay eventos" });
+      const data = fs.getRange(2, 1, last - 1, FINALES_HEADERS.length).getValues();
+      let borrados = 0;
+      for (let i = data.length - 1; i >= 0; i--) {
+        if ((data[i][9] || "").toString() === p.serieId) {
+          borrarCoberturasDeFinal((data[i][0] || "").toString());
+          fs.deleteRow(i + 2);
+          borrados++;
+        }
+      }
+      if (!borrados) return jsonOut({ status: "error", message: "Serie no encontrada" });
+      return jsonOut({ status: "ok", borrados });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }
@@ -3168,7 +3298,7 @@ function doGet(e) {
       const records = data.map(r => ({
         id: r[0], fecha: r[1], inicio: r[2], fin: r[3], direccion: r[4],
         empleados: (r[5] || "").toString().split("|").map(s => s.trim()).filter(Boolean),
-        nota: r[6], tipo: (r[8] || "Final de obra").toString()
+        nota: r[6], tipo: (r[8] || "Final de obra").toString(), serieId: (r[9] || "").toString()
       }));
       records.sort((a, b) => fechaAInt(b.fecha) - fechaAInt(a.fecha));
       return jsonOut({ status: "ok", records });

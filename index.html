@@ -939,11 +939,34 @@
       <option value="Final de obra">🏗️ Final de obra</option>
       <option value="Suplencias de servicios fuera de TRAPO">🧭 Suplencia fuera de TRAPO</option>
     </select>
-    <label>Fecha (dd/mm/aaaa)</label>
-    <div class="hora-sel">
-      <select id="fo-dia"></select><span>/</span>
-      <select id="fo-mes"></select><span>/</span>
-      <select id="fo-anio"></select>
+    <div id="fo-modo-wrap">
+      <label>¿Cuándo?</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <label class="fo-chip on" id="fo-modo-single-chip">
+          <input type="radio" name="fo-modo" value="single" checked onchange="onFinalModoChange()"><span>📅 Una fecha</span>
+        </label>
+        <label class="fo-chip" id="fo-modo-rango-chip">
+          <input type="radio" name="fo-modo" value="rango" onchange="onFinalModoChange()"><span>🔁 Rango (repetir)</span>
+        </label>
+      </div>
+    </div>
+    <!-- Modo UNA FECHA -->
+    <div id="fo-single">
+      <label>Fecha (dd/mm/aaaa)</label>
+      <div class="hora-sel">
+        <select id="fo-dia"></select><span>/</span>
+        <select id="fo-mes"></select><span>/</span>
+        <select id="fo-anio"></select>
+      </div>
+    </div>
+    <!-- Modo RANGO: período + días de la semana -->
+    <div id="fo-rango" style="display:none;">
+      <div class="fo-row">
+        <div><label for="fo-r-desde">Desde</label><input type="date" id="fo-r-desde" onchange="limpiarConflictosFinal()"></div>
+        <div><label for="fo-r-hasta">Hasta</label><input type="date" id="fo-r-hasta" onchange="limpiarConflictosFinal()"></div>
+      </div>
+      <label>Días de la semana</label>
+      <div id="fo-dias" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     </div>
     <div class="fo-row">
       <div>
@@ -5349,6 +5372,63 @@
     document.getElementById("fo-submit").textContent = `${info.icon} Programar ${info.label}`;
   }
 
+  // Modo del formulario de eventos: "single" (una fecha) o "rango" (repetir en
+  // un período por días de la semana).
+  function finalModo() {
+    const r = document.querySelector('input[name="fo-modo"]:checked');
+    return r ? r.value : "single";
+  }
+  function onFinalModoChange() {
+    const modo = finalModo();
+    document.getElementById("fo-single").style.display = modo === "single" ? "" : "none";
+    document.getElementById("fo-rango").style.display  = modo === "rango"  ? "" : "none";
+    document.getElementById("fo-modo-single-chip").classList.toggle("on", modo === "single");
+    document.getElementById("fo-modo-rango-chip").classList.toggle("on", modo === "rango");
+    limpiarConflictosFinal();
+  }
+  // Checkboxes de días de la semana (orden Lun→Dom; value = getDay 0..6).
+  function renderFinalDiasChecks(seleccionados) {
+    const sel = new Set(seleccionados || []);
+    const orden = [1, 2, 3, 4, 5, 6, 0];
+    document.getElementById("fo-dias").innerHTML = orden.map(n => {
+      const on = sel.has(n);
+      return `<label class="fo-chip${on ? " on" : ""}">
+        <input type="checkbox" class="fo-dia-chk" value="${n}"${on ? " checked" : ""}
+               onchange="this.closest('.fo-chip').classList.toggle('on', this.checked); limpiarConflictosFinal();">
+        <span>${DIAS_SEMANA[n]}</span>
+      </label>`;
+    }).join("");
+  }
+  // "yyyy-mm-dd" (input date) -> "dd/mm/aaaa". Vacío si no viene.
+  function isoToDMY(iso) {
+    if (!iso) return "";
+    const p = iso.split("-");
+    return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : "";
+  }
+  // Fechas dd/mm/aaaa del rango [desde, hasta] cuyo día de la semana está elegido.
+  function fechasDeRangoFront(desdeDMY, hastaDMY, diasArr) {
+    const p1 = (desdeDMY || "").split("/"), p2 = (hastaDMY || "").split("/");
+    if (p1.length !== 3 || p2.length !== 3) return [];
+    const a = new Date(+p1[2], +p1[1] - 1, +p1[0]);
+    const b = new Date(+p2[2], +p2[1] - 1, +p2[0]);
+    if (isNaN(a) || isNaN(b) || a > b) return [];
+    const set = {}; diasArr.forEach(d => set[d] = true);
+    const out = []; let guard = 0;
+    for (const d = new Date(a); d <= b && guard < 1000; d.setDate(d.getDate() + 1), guard++) {
+      if (set[d.getDay()]) out.push(fechaDMY(d));
+    }
+    return out;
+  }
+  // Unión de conflictos sobre varias fechas: único por empleado+servicio.
+  function finalObraConflictosUnion(empleados, fechas) {
+    const seen = {}; const out = [];
+    fechas.forEach(f => finalObraConflictos(empleados, f).forEach(c => {
+      const k = c.empleado + "||" + c.servicio;
+      if (!seen[k]) { seen[k] = true; out.push(c); }
+    }));
+    return out;
+  }
+
   function openAdminFinales() {
     adminShowStep("finales");
     cancelarEdicionFinal();
@@ -5381,16 +5461,27 @@
     document.getElementById("fo-msg").textContent = "";
     document.getElementById("fo-tipo").value   = "Final de obra";
     document.getElementById("fo-cancel").style.display = "none";
+    // Vuelve a modo "una fecha" y muestra el toggle (el rango es solo para alta).
+    document.getElementById("fo-modo-wrap").style.display = "";
+    document.querySelector('input[name="fo-modo"][value="single"]').checked = true;
+    document.getElementById("fo-r-desde").value = "";
+    document.getElementById("fo-r-hasta").value = "";
+    renderFinalDiasChecks();
+    onFinalModoChange();
     renderFinalesEmpleadosChecks();
     limpiarConflictosFinal();
     onFinalTipoChange();
   }
 
-  // Carga un final de obra existente en el formulario para editarlo.
+  // Carga un final de obra existente en el formulario para editarlo. La edición
+  // es siempre de UNA fecha (una ocurrencia); el modo rango se oculta.
   async function editarFinalObra(id) {
     const r = (adminFinalesCache || []).find(x => x.id === id);
     if (!r) return;
     finalObraEditId = id;
+    document.querySelector('input[name="fo-modo"][value="single"]').checked = true;
+    onFinalModoChange();
+    document.getElementById("fo-modo-wrap").style.display = "none";
     llenarFechaSelect("fo-dia", "fo-mes", "fo-anio", r.fecha);
     llenarHoraSelect("fo-inicio-h", "fo-inicio-m", hora24(r.inicio));
     llenarHoraSelect("fo-fin-h", "fo-fin-m", hora24(r.fin));
@@ -5417,27 +5508,45 @@
 
   async function crearFinalObra() {
     const msg = document.getElementById("fo-msg");
-    const fecha    = leerFechaSelect("fo-dia", "fo-mes", "fo-anio");
     const inicio   = leerHoraSelect("fo-inicio-h", "fo-inicio-m");
     const fin      = leerHoraSelect("fo-fin-h", "fo-fin-m");
     const dir      = document.getElementById("fo-dir").value.trim();
     const nota     = document.getElementById("fo-nota").value.trim();
+    const tipo     = document.getElementById("fo-tipo").value;
     const empleados = Array.from(document.querySelectorAll(".fo-emp-chk:checked")).map(c => c.value);
-    if (!fecha)           { msg.className = "error"; msg.textContent = "Elegí la fecha."; return; }
+    const modo     = finalModo();
     if (!inicio || !fin)  { msg.className = "error"; msg.textContent = "Poné horario desde y hasta."; return; }
     if (!dir)             { msg.className = "error"; msg.textContent = "Poné la dirección."; return; }
     if (!empleados.length){ msg.className = "error"; msg.textContent = "Elegí al menos un empleado."; return; }
 
-    // ¿Alguno de los elegidos tiene servicios regulares ese día? Hay que
+    // Según el modo, armamos las fechas afectadas + la firma del panel de
+    // conflictos. En "rango" los conflictos se juntan de TODAS las fechas.
+    let fechasAfectadas, sig;
+    let desde = "", hasta = "", diasArr = [];
+    if (modo === "rango") {
+      desde = isoToDMY(document.getElementById("fo-r-desde").value);
+      hasta = isoToDMY(document.getElementById("fo-r-hasta").value);
+      diasArr = Array.from(document.querySelectorAll(".fo-dia-chk:checked")).map(c => +c.value);
+      if (!desde || !hasta) { msg.className = "error"; msg.textContent = "Poné el rango de fechas (desde y hasta)."; return; }
+      if (!diasArr.length)  { msg.className = "error"; msg.textContent = "Elegí al menos un día de la semana."; return; }
+      fechasAfectadas = fechasDeRangoFront(desde, hasta, diasArr);
+      if (!fechasAfectadas.length) { msg.className = "error"; msg.textContent = "No hay fechas en ese rango con esos días (revisá desde/hasta)."; return; }
+      sig = "rango|" + empleados.slice().sort().join(",") + "|" + desde + "|" + hasta + "|" + diasArr.slice().sort().join(",");
+    } else {
+      const fecha = leerFechaSelect("fo-dia", "fo-mes", "fo-anio");
+      if (!fecha) { msg.className = "error"; msg.textContent = "Elegí la fecha."; return; }
+      fechasAfectadas = [fecha];
+      sig = foConflictoSig(empleados, fecha);
+    }
+
+    // ¿Algún empleado tiene servicios regulares en esas fechas? Hay que
     // reasignarlos/justificarlos antes de guardar (no se puede dejar pendiente).
     let resolucionesJSON = "";
-    const conflictos = finalObraConflictos(empleados, fecha);
+    const conflictos = finalObraConflictosUnion(empleados, fechasAfectadas);
     const cont = document.getElementById("fo-conflictos");
     if (conflictos.length) {
-      const sig = foConflictoSig(empleados, fecha);
       const panelVigente = sig === foConflictSig && cont.querySelector(".fo-conflict-sel");
       if (!panelVigente) {
-        // Primer aviso para este set de conflictos: mostrar el panel y frenar.
         renderFinalConflictos(conflictos, empleados);
         foConflictSig = sig;
         msg.className = "error";
@@ -5455,25 +5564,35 @@
       resolucionesJSON = JSON.stringify(res.list);
     }
 
-    const tipo = document.getElementById("fo-tipo").value;
     msg.className = "success"; msg.textContent = "Guardando...";
     const editando = !!finalObraEditId;
     try {
-      const params = {
-        action: editando ? "adminEditarFinalObra" : "adminCrearFinalObra",
-        admin: currentUser, hash: currentHash,
-        fecha, inicio, fin, direccion: dir, nota, tipo,
-        empleados: empleados.join("|")
-      };
+      let params;
+      if (modo === "rango") {
+        params = {
+          action: "adminCrearFinalObraRango", admin: currentUser, hash: currentHash,
+          desde, hasta, dias: diasArr.join(","), inicio, fin, direccion: dir, nota, tipo,
+          empleados: empleados.join("|")
+        };
+      } else {
+        params = {
+          action: editando ? "adminEditarFinalObra" : "adminCrearFinalObra",
+          admin: currentUser, hash: currentHash,
+          fecha: fechasAfectadas[0], inicio, fin, direccion: dir, nota, tipo,
+          empleados: empleados.join("|")
+        };
+        if (editando) params.id = finalObraEditId;
+      }
       if (resolucionesJSON) params.resoluciones = resolucionesJSON;
-      if (editando) params.id = finalObraEditId;
       const j = await fetchJson(params);
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
       adminFinalesCache = null;
       cancelarEdicionFinal();
       const msg2 = document.getElementById("fo-msg");
       msg2.className = "success";
-      msg2.textContent = editando ? "✅ Cambios guardados." : `✅ ${eventoTipoInfo(tipo).label} programado.`;
+      msg2.textContent = editando ? "✅ Cambios guardados."
+        : (modo === "rango" ? `✅ ${eventoTipoInfo(tipo).label}: ${j.creados} fecha${j.creados === 1 ? "" : "s"} programada${j.creados === 1 ? "" : "s"}.`
+                            : `✅ ${eventoTipoInfo(tipo).label} programado.`);
       loadAdminFinales();
     } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
   }
@@ -5496,12 +5615,17 @@
     const recs = adminFinalesCache || [];
     if (!recs.length) { el.innerHTML = `<div class="hist-empty">No hay eventos cargados.</div>`; return; }
     const hoyInt = dmyToInt(fechaDMY(new Date()));
+    // Cuántas fechas tiene cada serie (para el chip y el "Eliminar serie").
+    const serieCount = {};
+    recs.forEach(r => { if (r.serieId) serieCount[r.serieId] = (serieCount[r.serieId] || 0) + 1; });
     el.innerHTML = recs.map(r => {
       const pasado = dmyToInt(r.fecha) < hoyInt;
       const info = eventoTipoInfo(r.tipo);
+      const serie = r.serieId
+        ? `<span class="badge" style="background:#e0e7ff;color:#3730a3;margin-left:6px;">🔁 serie (${serieCount[r.serieId]})</span>` : "";
       return `
       <div class="hist-day"${pasado ? ' style="opacity:.6;"' : ""}>
-        <div class="hist-day-label">${info.icon} ${info.label} · ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}</div>
+        <div class="hist-day-label">${info.icon} ${info.label} · ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}${serie}</div>
         <div class="hist-row">
           <div>
             <div class="hr-serv">📍 ${r.direccion}</div>
@@ -5511,6 +5635,7 @@
           <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
             <button class="btn-mini btn-cambiar" style="margin:0;" onclick="editarFinalObra('${r.id}')">✏️ Editar</button>
             <button class="btn-mini btn-anular" onclick="eliminarFinalObra('${r.id}')">Eliminar</button>
+            ${r.serieId ? `<button class="btn-mini btn-anular" onclick="eliminarSerieFinal('${r.serieId}', ${serieCount[r.serieId]})">🗑 Serie</button>` : ""}
           </div>
         </div>
       </div>`;
@@ -5521,6 +5646,14 @@
     if (!confirm("¿Eliminar este evento? Dejará de verlo el empleado.")) return;
     const j = await fetchJson({ action: "adminEliminarFinalObra", admin: currentUser, hash: currentHash, id });
     if (j.status !== "ok") { alert(j.message || "No se pudo eliminar."); return; }
+    adminFinalesCache = null;
+    loadAdminFinales();
+  }
+
+  async function eliminarSerieFinal(serieId, cantidad) {
+    if (!confirm(`¿Eliminar TODA la serie (${cantidad} fecha${cantidad === 1 ? "" : "s"})? Se borran todas sus fechas y reasignaciones.`)) return;
+    const j = await fetchJson({ action: "adminEliminarSerie", admin: currentUser, hash: currentHash, serieId });
+    if (j.status !== "ok") { alert(j.message || "No se pudo eliminar la serie."); return; }
     adminFinalesCache = null;
     loadAdminFinales();
   }
