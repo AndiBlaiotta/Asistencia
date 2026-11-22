@@ -5587,12 +5587,22 @@
       const j = await fetchJson(params);
       if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
       adminFinalesCache = null;
-      cancelarEdicionFinal();
+      if (editando) {
+        cancelarEdicionFinal();               // al editar, se sale de edición (reset total)
+      } else {
+        // Al CREAR, conservamos fecha(s)/horario/días/empleados/tipo para poder
+        // cargar otro evento igual cambiando solo la ubicación. Limpiamos la
+        // dirección (es lo que cambia) y el panel de conflictos (cada evento
+        // resuelve el suyo).
+        document.getElementById("fo-dir").value = "";
+        document.getElementById("fo-dir").focus();
+        limpiarConflictosFinal();
+      }
       const msg2 = document.getElementById("fo-msg");
       msg2.className = "success";
       msg2.textContent = editando ? "✅ Cambios guardados."
-        : (modo === "rango" ? `✅ ${eventoTipoInfo(tipo).label}: ${j.creados} fecha${j.creados === 1 ? "" : "s"} programada${j.creados === 1 ? "" : "s"}.`
-                            : `✅ ${eventoTipoInfo(tipo).label} programado.`);
+        : (modo === "rango" ? `✅ ${eventoTipoInfo(tipo).label}: ${j.creados} fecha${j.creados === 1 ? "" : "s"} programada${j.creados === 1 ? "" : "s"}. (Cambiá la dirección para cargar otro con las mismas fechas.)`
+                            : `✅ ${eventoTipoInfo(tipo).label} programado. (Cambiá la dirección para cargar otro en la misma fecha.)`);
       loadAdminFinales();
     } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
   }
