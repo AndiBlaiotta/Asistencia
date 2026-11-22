@@ -5620,6 +5620,13 @@
     }
   }
 
+  // Normaliza una dirección para agrupar (sin acentos, minúsculas, espacios
+  // colapsados): así "Defilippi 1052" y "defilippi  1052" caen en el mismo grupo.
+  function normalizarDir(d) {
+    return (d || "").toString().trim().toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
+  }
+
   function renderAdminFinales() {
     const el = document.getElementById("admin-finales-list");
     const recs = adminFinalesCache || [];
@@ -5628,17 +5635,35 @@
     // Cuántas fechas tiene cada serie (para el chip y el "Eliminar serie").
     const serieCount = {};
     recs.forEach(r => { if (r.serieId) serieCount[r.serieId] = (serieCount[r.serieId] || 0) + 1; });
-    el.innerHTML = recs.map(r => {
-      const pasado = dmyToInt(r.fecha) < hoyInt;
-      const info = eventoTipoInfo(r.tipo);
-      const serie = r.serieId
-        ? `<span class="badge" style="background:#e0e7ff;color:#3730a3;margin-left:6px;">🔁 serie (${serieCount[r.serieId]})</span>` : "";
-      return `
-      <div class="hist-day"${pasado ? ' style="opacity:.6;"' : ""}>
-        <div class="hist-day-label">${info.icon} ${info.label} · ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}${serie}</div>
-        <div class="hist-row">
+
+    // Agrupa por TIPO de trabajo + DIRECCIÓN: misma dirección y mismo tipo van
+    // juntas; misma dirección pero distinto tipo, separadas.
+    const grupos = {};
+    recs.forEach(r => {
+      const tipo = r.tipo || "Final de obra";
+      const k = tipo + "||" + normalizarDir(r.direccion);
+      if (!grupos[k]) grupos[k] = { tipo, dir: r.direccion, items: [] };
+      grupos[k].items.push(r);
+    });
+    // Orden de los grupos: por tipo y luego por dirección.
+    const keys = Object.keys(grupos).sort((a, b) => {
+      const ga = grupos[a], gb = grupos[b];
+      return eventoTipoInfo(ga.tipo).label.localeCompare(eventoTipoInfo(gb.tipo).label)
+          || ga.dir.localeCompare(gb.dir);
+    });
+
+    el.innerHTML = keys.map(k => {
+      const g = grupos[k];
+      const info = eventoTipoInfo(g.tipo);
+      const items = g.items.slice().sort((a, b) => dmyToInt(a.fecha) - dmyToInt(b.fecha)); // cronológico
+      const filas = items.map(r => {
+        const pasado = dmyToInt(r.fecha) < hoyInt;
+        const serie = r.serieId
+          ? `<span class="badge" style="background:#e0e7ff;color:#3730a3;margin-left:6px;">🔁 serie (${serieCount[r.serieId]})</span>` : "";
+        return `
+        <div class="hist-row"${pasado ? ' style="opacity:.55;"' : ""}>
           <div>
-            <div class="hr-serv">📍 ${r.direccion}</div>
+            <div class="hr-serv">📅 ${fechaConDia(r.fecha)} · ${hora24(r.inicio)}–${hora24(r.fin)}${pasado ? " · (pasado)" : ""}${serie}</div>
             <div class="hr-hora">👥 ${r.empleados.join(", ")}</div>
             ${r.nota ? `<div class="hr-hora">📝 ${r.nota}</div>` : ""}
           </div>
@@ -5647,7 +5672,12 @@
             <button class="btn-mini btn-anular" onclick="eliminarFinalObra('${r.id}')">Eliminar</button>
             ${r.serieId ? `<button class="btn-mini btn-anular" onclick="eliminarSerieFinal('${r.serieId}', ${serieCount[r.serieId]})">🗑 Serie</button>` : ""}
           </div>
-        </div>
+        </div>`;
+      }).join("");
+      return `
+      <div class="hist-day" style="margin-bottom:14px;">
+        <div class="hist-day-label">${info.icon} ${info.label} · 📍 ${g.dir} · ${items.length} fecha${items.length === 1 ? "" : "s"}</div>
+        ${filas}
       </div>`;
     }).join("");
   }
