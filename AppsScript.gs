@@ -1822,7 +1822,7 @@ function novedadesDe(empleado) {
     vsheetN.getRange(2, 1, vsheetN.getLastRow() - 1, VACAS_HEADERS.length).getValues().forEach(r => {
       if ((r[1] || "").toString() !== empleado) return;
       const est = (r[5] || "").toString();
-      if (est === "Aceptada")       vacsAcep.push([fechaAInt(r[2]), fechaAInt(r[3])]);
+      if (est === "Aceptada")       vacsAcep.push([fechaAInt(r[2]), fechaAInt(r[3]), (r[8] || "").toString()]);
       else if (est === "Pendiente") vacsPend.push([fechaAInt(r[2]), fechaAInt(r[3])]);
     });
   }
@@ -1841,7 +1841,9 @@ function novedadesDe(empleado) {
   FERIADOS.forEach(fstr => {
     const fi = fechaAInt(fstr);
     if (isNaN(fi) || fi < pisoN || fi >= hoyIntN) return;          // fuera de rango / feriado de hoy o futuro
-    const conLicencia = enRango(vacsAcep, fi);
+    const licAcep = vacsAcep.find(v => !isNaN(v[0]) && !isNaN(v[1]) && fi >= v[0] && fi <= v[1]);
+    const conLicencia = !!licAcep;
+    const licenciaTipo = licAcep ? (licAcep[2] || "") : "";
     const licenciaPend = !conLicencia && enRango(vacsPend, fi);
     const dObjF = fechaADate(fstr);
     const mesF2 = Utilities.formatDate(dObjF, tz, "yyyy-MM");
@@ -1850,7 +1852,7 @@ function novedadesDe(empleado) {
       if (entradaSet[serv + "|" + fi]) return;                     // fichó: ya hay fila "Feriado"
       if (conLicencia) {                                           // licencia otorgada por feriado
         dias.push({ mes: mesF2, fecha: fstr, fi, servicio: serv, tipo: "Feriado (licencia)",
-                    desde: null, hasta: null, minutos: 0, licencia: true });
+                    desde: null, hasta: null, minutos: 0, licencia: true, licenciaTipo });
         return;
       }
       if (licenciaPend) return;                                    // pedido pendiente: no se marca aún
