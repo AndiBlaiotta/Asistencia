@@ -1803,25 +1803,30 @@ function novedadesDe(empleado) {
   dias.sort((a, b) => a.fi - b.fi || ord(a.desde) - ord(b.desde));
 
   // Pase extra: FERIADOS en que el empleado tenía turno AGENDADO (HORARIOS) y NO
-  // fichó (y no estaba de licencia ni cubierto por un suplente) -> novedad
-  // "Feriado (faltó)". Permite ver quién NO trabajó el feriado (sin plus): p. ej.
-  // en lugares con 2 personas donde va 1 sola, la que no fue queda señalada.
+  // fichó. Tres casos distinguidos (contracara del "Feriado" trabajado):
+  //  - con LICENCIA otorgada (aceptada) que cubre el día -> "Feriado (licencia)":
+  //    pidió faltar con anticipación y se le concedió; es licencia POR feriado.
+  //  - con licencia solo PENDIENTE -> no se marca todavía (no está otorgada).
+  //  - sin licencia ni cobertura -> "Feriado (faltó)": no trabajó, sin plus.
+  // Sirve para ver en cada feriado quién lo trabajó (plus), quién faltó y quién
+  // tenía licencia (ej. lugares con 2 personas donde va 1 sola).
   const hoyIntN = (function () { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
   const altaIntN  = fechaAInt((VACAS_CONFIG[empleado] || {}).alta);
   const ausDesdeN = fechaAInt(AUSENCIAS_DESDE);
   let pisoN = isNaN(ausDesdeN) ? -Infinity : ausDesdeN;
   if (!isNaN(altaIntN)) pisoN = Math.max(pisoN, altaIntN);
-  // Licencias (aceptada/pendiente) del empleado.
-  const vacsN = [];
+  // Licencias del empleado, separadas por estado.
+  const vacsAcep = [], vacsPend = [];
   const vsheetN = getVacacionesSheet();
   if (vsheetN.getLastRow() > 1) {
     vsheetN.getRange(2, 1, vsheetN.getLastRow() - 1, VACAS_HEADERS.length).getValues().forEach(r => {
+      if ((r[1] || "").toString() !== empleado) return;
       const est = (r[5] || "").toString();
-      if ((r[1] || "").toString() === empleado && (est === "Aceptada" || est === "Pendiente")) {
-        vacsN.push([fechaAInt(r[2]), fechaAInt(r[3])]);
-      }
+      if (est === "Aceptada")       vacsAcep.push([fechaAInt(r[2]), fechaAInt(r[3])]);
+      else if (est === "Pendiente") vacsPend.push([fechaAInt(r[2]), fechaAInt(r[3])]);
     });
   }
+  const enRango = (arr, fi) => arr.some(v => !isNaN(v[0]) && !isNaN(v[1]) && fi >= v[0] && fi <= v[1]);
   // Coberturas donde este empleado es titular (servicio cubierto/justificado).
   const cubiertoN = {};
   const csheetN = getCoberturasSheet();
@@ -1836,16 +1841,23 @@ function novedadesDe(empleado) {
   FERIADOS.forEach(fstr => {
     const fi = fechaAInt(fstr);
     if (isNaN(fi) || fi < pisoN || fi >= hoyIntN) return;          // fuera de rango / feriado de hoy o futuro
-    if (vacsN.some(v => !isNaN(v[0]) && !isNaN(v[1]) && fi >= v[0] && fi <= v[1])) return; // de licencia
+    const conLicencia = enRango(vacsAcep, fi);
+    const licenciaPend = !conLicencia && enRango(vacsPend, fi);
+    const dObjF = fechaADate(fstr);
+    const mesF2 = Utilities.formatDate(dObjF, tz, "yyyy-MM");
     serviciosRegularesEnFecha(empleado, fstr).forEach(sv => {
       const serv = sv.servicio;
       if (entradaSet[serv + "|" + fi]) return;                     // fichó: ya hay fila "Feriado"
+      if (conLicencia) {                                           // licencia otorgada por feriado
+        dias.push({ mes: mesF2, fecha: fstr, fi, servicio: serv, tipo: "Feriado (licencia)",
+                    desde: null, hasta: null, minutos: 0, licencia: true });
+        return;
+      }
+      if (licenciaPend) return;                                    // pedido pendiente: no se marca aún
       const rg = cubiertoN[serv];
       if (rg && rg.some(x => fi >= x[0] && fi <= x[1])) return;     // cubierto/justificado
-      const dObjF = fechaADate(fstr);
-      dias.push({ mes: Utilities.formatDate(dObjF, tz, "yyyy-MM"), fecha: fstr, fi,
-                  servicio: serv, tipo: "Feriado (faltó)", desde: null, hasta: null,
-                  minutos: 0, noTrabajado: true });
+      dias.push({ mes: mesF2, fecha: fstr, fi, servicio: serv, tipo: "Feriado (faltó)",
+                  desde: null, hasta: null, minutos: 0, noTrabajado: true });
     });
   });
   dias.sort((a, b) => a.fi - b.fi || ord(a.desde) - ord(b.desde));
