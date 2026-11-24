@@ -1480,14 +1480,16 @@ function fechasDeRango(desdeDMY, hastaDMY, diasSet, cap) {
 }
 
 // ---- Feriados nacionales (dd/MM/yyyy) ----
-// ⚠️ SOLO feriados nacionales (los "días no laborables" NO van acá: para la
-// empresa son día normal). Las horas fichadas en feriado o domingo cuentan
-// SIEMPRE como extra. Lista para confirmar/actualizar con Andi cada año.
+// ⚠️ Feriados nacionales (los "días no laborables" NO van acá: para la empresa
+// son día normal). Excepción agregada a mano por Andi: el 11/11/2026 es feriado
+// SOLO de provincia de Buenos Aires (visita del Papa León XIV) pero nos afecta,
+// así que se cuenta como feriado trabajado. Lista para confirmar/actualizar cada
+// año. (El 09/11/2026 sí es nacional por la misma visita.)
 const FERIADOS = [
   "01/01/2026", "16/02/2026", "17/02/2026", "24/03/2026", "02/04/2026",
   "03/04/2026", "01/05/2026", "25/05/2026", "15/06/2026", "20/06/2026",
-  "09/07/2026", "17/08/2026", "12/10/2026", "23/11/2026", "08/12/2026",
-  "25/12/2026"
+  "09/07/2026", "17/08/2026", "12/10/2026", "09/11/2026", "11/11/2026",
+  "23/11/2026", "08/12/2026", "25/12/2026"
 ];
 const FERIADOS_SET = (function () {
   const s = {};
