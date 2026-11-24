@@ -4898,9 +4898,12 @@
         </div>`;
       }
       const filasDias = nf.dias.map(d => {
-        const badge = d.tipo === "Feriado" ? "badge-tarde"
+        const badge = d.noTrabajado ? "badge-salida"
+                    : d.tipo === "Feriado" ? "badge-tarde"
                     : d.tipo === "Domingo" ? "badge-comprado" : "badge-extra";
-        const horaTxt = d.falta === "salida"
+        const horaTxt = d.noTrabajado
+              ? `🚫 <b style="color:#dc2626;">no trabajó el feriado</b>`
+              : d.falta === "salida"
               ? `🕐 ${minAHHMM(d.desde)} → <b style="color:#dc2626;">sin salida</b>`
               : d.falta === "entrada"
               ? `🕐 <b style="color:#dc2626;">sin entrada</b> → ${minAHHMM(d.hasta)}`
@@ -4993,7 +4996,7 @@
         d.tipo, d.servicio,
         d.desde == null ? "" : minAHHMM(d.desde),
         d.hasta == null ? "" : minAHHMM(d.hasta),
-        d.falta === "salida" ? "sin salida" : d.falta === "entrada" ? "sin entrada" : fmtMinutos(d.minutos),
+        d.noTrabajado ? "no trabajó" : d.falta === "salida" ? "sin salida" : d.falta === "entrada" ? "sin entrada" : fmtMinutos(d.minutos),
         d.minutos ? dec(d.minutos) : ""
       ]));
       nf.tiempoExtra.forEach(t => rows.push([

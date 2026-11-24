@@ -1711,6 +1711,9 @@ function emparejarFichadas(ent, sal) {
 //  - servicio LIBRE (Horas extra, Final de obra, Suplencia, Servicio extra),
 //    en cualquier día: la fila sale con ese badge (si además es feriado/
 //    domingo, manda el feriado/domingo en el badge y el servicio ya dice cuál).
+//  - "Feriado (faltó)": tenía turno AGENDADO en un feriado y NO fichó (ni estaba
+//    de licencia ni cubierto). Contracara del "Feriado" trabajado: sirve para ver
+//    quién NO hizo el feriado (sin plus), ej. lugar con 2 personas donde va 1.
 // La fila sale AUNQUE falte una de las dos fichadas (entrada sin salida, o al
 // revés): trae `falta`="salida"/"entrada" y minutos 0, así nunca se pierde un
 // feriado/extra que quedó sin cerrar (bug viejo: se exigía el par completo).
@@ -1733,6 +1736,7 @@ function novedadesDe(empleado) {
   const weekMonth  = {};   // wkInt -> "yyyy-MM" (mes del lunes)
   const eventos    = {};   // "servicio|fi" -> { fecha, fi, servicio, tipo, mes, ent:[], sal:[] }
   const libres     = {};   // "servicio|fi" -> { wk, ent:[], sal:[] }  (para el total semanal)
+  const entradaSet = {};   // "servicio|fi" con una Entrada fichada (para detectar feriados NO trabajados)
 
   data.forEach(row => {
     const fechaStr = fmtCell(row[0]);
@@ -1749,6 +1753,7 @@ function novedadesDe(empleado) {
     weekMonth[wk] = Utilities.formatDate(lunes, tz, "yyyy-MM");
     const hm = horaAMin(fmtCell(row[4]));
     const esLibre = SERVICIOS_LIBRES.indexOf(servicio) !== -1;
+    if (tipo === "Entrada") entradaSet[servicio + "|" + fi] = true;
 
     // Total semanal (base del excedente): regular por duración programada, libres
     // por duración real. Cuenta todos los días (incluido domingo/feriado).
@@ -1795,6 +1800,54 @@ function novedadesDe(empleado) {
     });
   });
   const ord = x => (x == null ? 1e9 : x);
+  dias.sort((a, b) => a.fi - b.fi || ord(a.desde) - ord(b.desde));
+
+  // Pase extra: FERIADOS en que el empleado tenía turno AGENDADO (HORARIOS) y NO
+  // fichó (y no estaba de licencia ni cubierto por un suplente) -> novedad
+  // "Feriado (faltó)". Permite ver quién NO trabajó el feriado (sin plus): p. ej.
+  // en lugares con 2 personas donde va 1 sola, la que no fue queda señalada.
+  const hoyIntN = (function () { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
+  const altaIntN  = fechaAInt((VACAS_CONFIG[empleado] || {}).alta);
+  const ausDesdeN = fechaAInt(AUSENCIAS_DESDE);
+  let pisoN = isNaN(ausDesdeN) ? -Infinity : ausDesdeN;
+  if (!isNaN(altaIntN)) pisoN = Math.max(pisoN, altaIntN);
+  // Licencias (aceptada/pendiente) del empleado.
+  const vacsN = [];
+  const vsheetN = getVacacionesSheet();
+  if (vsheetN.getLastRow() > 1) {
+    vsheetN.getRange(2, 1, vsheetN.getLastRow() - 1, VACAS_HEADERS.length).getValues().forEach(r => {
+      const est = (r[5] || "").toString();
+      if ((r[1] || "").toString() === empleado && (est === "Aceptada" || est === "Pendiente")) {
+        vacsN.push([fechaAInt(r[2]), fechaAInt(r[3])]);
+      }
+    });
+  }
+  // Coberturas donde este empleado es titular (servicio cubierto/justificado).
+  const cubiertoN = {};
+  const csheetN = getCoberturasSheet();
+  if (csheetN.getLastRow() > 1) {
+    csheetN.getRange(2, 1, csheetN.getLastRow() - 1, COBERTURAS_HEADERS.length).getValues().forEach(r => {
+      if ((r[3] || "").toString() !== empleado) return;
+      const d = fechaAInt(r[5]), h = fechaAInt(r[6]);
+      if (isNaN(d) || isNaN(h)) return;
+      (cubiertoN[(r[2] || "").toString()] = cubiertoN[(r[2] || "").toString()] || []).push([d, h]);
+    });
+  }
+  FERIADOS.forEach(fstr => {
+    const fi = fechaAInt(fstr);
+    if (isNaN(fi) || fi < pisoN || fi >= hoyIntN) return;          // fuera de rango / feriado de hoy o futuro
+    if (vacsN.some(v => !isNaN(v[0]) && !isNaN(v[1]) && fi >= v[0] && fi <= v[1])) return; // de licencia
+    serviciosRegularesEnFecha(empleado, fstr).forEach(sv => {
+      const serv = sv.servicio;
+      if (entradaSet[serv + "|" + fi]) return;                     // fichó: ya hay fila "Feriado"
+      const rg = cubiertoN[serv];
+      if (rg && rg.some(x => fi >= x[0] && fi <= x[1])) return;     // cubierto/justificado
+      const dObjF = fechaADate(fstr);
+      dias.push({ mes: Utilities.formatDate(dObjF, tz, "yyyy-MM"), fecha: fstr, fi,
+                  servicio: serv, tipo: "Feriado (faltó)", desde: null, hasta: null,
+                  minutos: 0, noTrabajado: true });
+    });
+  });
   dias.sort((a, b) => a.fi - b.fi || ord(a.desde) - ord(b.desde));
 
   // Excedente semanal por mes (lo único que es horas extra).
