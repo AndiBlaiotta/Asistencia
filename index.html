@@ -952,12 +952,8 @@
     </div>
     <!-- Modo UNA FECHA -->
     <div id="fo-single">
-      <label>Fecha (dd/mm/aaaa)</label>
-      <div class="hora-sel">
-        <select id="fo-dia"></select><span>/</span>
-        <select id="fo-mes"></select><span>/</span>
-        <select id="fo-anio"></select>
-      </div>
+      <label for="fo-fecha">Fecha</label>
+      <input type="date" id="fo-fecha" onchange="limpiarConflictosFinal()">
     </div>
     <!-- Modo RANGO: período + días de la semana -->
     <div id="fo-rango" style="display:none;">
@@ -1200,12 +1196,9 @@
     <div class="modal-sub" id="msol-sub"></div>
     <label>Tareas que querés que hagamos</label>
     <div id="msol-items"></div>
-    <label style="margin-top:8px;">Día (dd/mm/aaaa)</label>
-    <div class="hora-sel">
-      <select id="msol-dia"></select><span>/</span>
-      <select id="msol-mes"></select><span>/</span>
-      <select id="msol-anio"></select>
-    </div>
+    <label for="msol-fecha" style="margin-top:8px;">Día</label>
+    <input type="date" id="msol-fecha">
+
     <div class="fo-row">
       <div>
         <label>Desde</label>
@@ -5475,7 +5468,7 @@
   // Vuelve el formulario al estado "alta nueva" (vacío) y sale de edición.
   function cancelarEdicionFinal() {
     finalObraEditId = null;
-    llenarFechaSelect("fo-dia", "fo-mes", "fo-anio");
+    document.getElementById("fo-fecha").value = isoFromDMY(fechaDMY(new Date()));
     llenarHoraSelect("fo-inicio-h", "fo-inicio-m");
     llenarHoraSelect("fo-fin-h", "fo-fin-m");
     document.getElementById("fo-dir").value    = "";
@@ -5504,7 +5497,7 @@
     document.querySelector('input[name="fo-modo"][value="single"]').checked = true;
     onFinalModoChange();
     document.getElementById("fo-modo-wrap").style.display = "none";
-    llenarFechaSelect("fo-dia", "fo-mes", "fo-anio", r.fecha);
+    document.getElementById("fo-fecha").value = isoFromDMY(r.fecha);
     llenarHoraSelect("fo-inicio-h", "fo-inicio-m", hora24(r.inicio));
     llenarHoraSelect("fo-fin-h", "fo-fin-m", hora24(r.fin));
     document.getElementById("fo-dir").value    = r.direccion || "";
@@ -5555,7 +5548,7 @@
       if (!fechasAfectadas.length) { msg.className = "error"; msg.textContent = "No hay fechas en ese rango con esos días (revisá desde/hasta)."; return; }
       sig = "rango|" + empleados.slice().sort().join(",") + "|" + desde + "|" + hasta + "|" + diasArr.slice().sort().join(",");
     } else {
-      const fecha = leerFechaSelect("fo-dia", "fo-mes", "fo-anio");
+      const fecha = isoToDMY(document.getElementById("fo-fecha").value);
       if (!fecha) { msg.className = "error"; msg.textContent = "Elegí la fecha."; return; }
       fechasAfectadas = [fecha];
       sig = foConflictoSig(empleados, fecha);
@@ -5821,29 +5814,6 @@
   // Selector de fecha propio en dd/mm/aaaa (sin el calendario nativo, que muestra
   // la fecha en el formato del equipo). `dmy` opcional ("dd/mm/aaaa") preselecciona;
   // si no, arranca en el día de hoy.
-  function llenarFechaSelect(dId, mId, aId, dmy) {
-    const dSel = document.getElementById(dId);
-    const mSel = document.getElementById(mId);
-    const aSel = document.getElementById(aId);
-    let d = ""; for (let i = 1; i <= 31; i++) d += `<option value="${pad2(i)}">${pad2(i)}</option>`;
-    let m = ""; for (let i = 1; i <= 12; i++) m += `<option value="${pad2(i)}">${pad2(i)}</option>`;
-    const y = new Date().getFullYear(); let a = "";
-    for (let i = y; i <= y + 1; i++) a += `<option value="${i}">${i}</option>`;
-    dSel.innerHTML = d; mSel.innerHTML = m; aSel.innerHTML = a;
-    const p = (dmy || "").split("/");
-    const base = p.length === 3 ? { d: pad2(+p[0]), m: pad2(+p[1]), a: p[2] } : null;
-    const hoy = new Date();
-    dSel.value = base ? base.d : pad2(hoy.getDate());
-    mSel.value = base ? base.m : pad2(hoy.getMonth() + 1);
-    aSel.value = base ? base.a : String(hoy.getFullYear());
-  }
-  function leerFechaSelect(dId, mId, aId) {
-    const d = document.getElementById(dId).value;
-    const m = document.getElementById(mId).value;
-    const a = document.getElementById(aId).value;
-    return (d && m && a) ? `${d}/${m}/${a}` : "";
-  }
-
   // Abre el modal de solicitud para un depto, con la checklist y el día de hoy.
   let solModal = null; // { ei, depto }
   function openSolicitudModal(ei, depto) {
@@ -5856,7 +5826,7 @@
                onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
         <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
       </label>`).join("");
-    llenarFechaSelect("msol-dia", "msol-mes", "msol-anio");
+    document.getElementById("msol-fecha").value = isoFromDMY(fechaDMY(new Date()));
     llenarHoraSelect("msol-desde-h", "msol-desde-m");
     llenarHoraSelect("msol-hasta-h", "msol-hasta-m");
     document.getElementById("msol-nota").value  = "";
@@ -5873,7 +5843,7 @@
     const msg = document.getElementById("msol-msg");
     const edificio = clienteData.edificios[solModal.ei].nombre;
     const tareas = Array.from(document.querySelectorAll(".msol-chk:checked")).map(c => c.value);
-    const fecha = leerFechaSelect("msol-dia", "msol-mes", "msol-anio");
+    const fecha = isoToDMY(document.getElementById("msol-fecha").value);
     const desde = leerHoraSelect("msol-desde-h", "msol-desde-m");
     const hasta = leerHoraSelect("msol-hasta-h", "msol-hasta-m");
     const nota  = document.getElementById("msol-nota").value.trim();
@@ -6183,15 +6153,14 @@
   // ============================================================
   // WIDGETS DE FECHA/HORA — SIEMPRE dd/mm/aaaa y 24h en TODA la app
   // ------------------------------------------------------------
-  // Los <input type="date"/"time"> nativos muestran la fecha/hora según el
-  // idioma del equipo (AM/PM, mm/dd/aaaa, etc.). Para forzar dd/mm/aaaa y 24h
-  // en todos lados, cada uno se reemplaza por selects propios. El valor queda en
-  // un <input hidden> con el MISMO id y el MISMO formato que tenía el nativo
-  // (fecha ISO "yyyy-mm-dd", hora "HH:MM"), así el resto del código
-  // (getElementById(id).value) sigue funcionando igual. Para SETear un valor por
-  // código usar dtSet(id, valor). Un MutationObserver convierte también los que
-  // se crean dinámicamente (ej. filtros por rango). Los formularios de Finales de
-  // obra y del cliente ya usan selects propios, así que no pasan por acá.
+  // Las HORAS nativas (<input type="time">) muestran AM/PM según el idioma del
+  // equipo; para forzar 24h se reemplazan por selects propios. El valor queda en
+  // un <input hidden> con el MISMO id y formato nativo ("HH:MM"), así el resto del
+  // código (getElementById(id).value) sigue funcionando igual. Para SETear usar
+  // dtSet(id, valor). Un MutationObserver convierte también las que se crean
+  // dinámicamente. Las FECHAS NO se tocan: se dejan como <input type="date">
+  // nativo (calendario, muestra el día de la semana) — su .value ya es ISO
+  // "yyyy-mm-dd", locale-independiente, así que no hay riesgo de parseo.
   const _dtReg = {}; // id -> { tipo, sels, hidden, setFrom(valor) }
 
   function _dtOpts(desde, hasta, pad, placeholder) {
@@ -6210,8 +6179,9 @@
 
   function upgradarUnInput(inp) {
     if (!inp || !inp.parentNode || !inp.id) return;
+    if (inp.type !== "time") return;   // las fechas quedan nativas (calendario)
     const id = inp.id;
-    const tipo = inp.type === "time" ? "time" : "date";
+    const tipo = "time";
     const handlerAttr = inp.getAttribute("onchange") || "";
     const valorInicial = inp.value || "";
     const wrap = document.createElement("div");
@@ -6265,7 +6235,7 @@
   }
 
   function upgradarCamposFechaHora(root) {
-    (root || document).querySelectorAll('input[type="date"],input[type="time"]').forEach(upgradarUnInput);
+    (root || document).querySelectorAll('input[type="time"]').forEach(upgradarUnInput);
   }
 
   // Equivalente a `getElementById(id).value = valor` para un campo ya convertido
@@ -6283,7 +6253,7 @@
       const obs = new MutationObserver(muts => {
         muts.forEach(m => m.addedNodes && m.addedNodes.forEach(n => {
           if (n.nodeType !== 1) return;
-          if (n.tagName === "INPUT" && (n.type === "date" || n.type === "time")) upgradarUnInput(n);
+          if (n.tagName === "INPUT" && n.type === "time") upgradarUnInput(n);
           else if (n.querySelectorAll) upgradarCamposFechaHora(n);
         }));
       });
