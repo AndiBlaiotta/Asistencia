@@ -84,6 +84,7 @@ const CHECKLIST_DEPTO = [
   { clave: "Baño",                          detalle: "Limpieza completa y desinfección." },
   { clave: "Ropa blanca",                   detalle: "Cambio de sábanas y toallas, y cama tendida igual que en las fotos del aviso." },
   { clave: "Cocina",                        detalle: "Limpieza, lavado de vajilla y limpieza por dentro de microondas, cafetera y pava." },
+  { clave: "Limpieza de horno",             detalle: "Limpieza del horno por dentro y las hornallas." },
   { clave: "Heladera y residuos",           detalle: "Vaciar lo que dejaron los huéspedes y sacar la basura." },
   { clave: "Pisos",                         detalle: "Aspirado o barrido y trapeado." },
   { clave: "Vidrios",                       detalle: "Solo cara interior y lo que se alcanza desde el balcón." },
