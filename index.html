@@ -676,6 +676,7 @@
       <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('visitas')">📝 Visitas</button>
       <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('materiales')">🚚 Retirar materiales</button>
       <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('fichadas')">🕐 Fichadas</button>
+      <button class="btn btn-primary" style="flex:1;min-width:120px;margin:0;" onclick="supShowView('deptos')">🏢 Deptos</button>
     </div>
 
     <!-- Visitas: semáforo semanal + formulario de checklist -->
@@ -715,6 +716,16 @@
       <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Para controlar que lleguen y se vayan en horario.</div>
       <select id="sup-fich-emp" onchange="cargarSupFichadas()" style="width:100%;margin-bottom:10px;"></select>
       <div id="sup-fich-list"></div>
+    </div>
+
+    <!-- Deptos: marcar la limpieza como hecha -->
+    <div id="sup-view-deptos" style="display:none;">
+      <div class="section-title">Deptos · marcar limpieza hecha</div>
+      <div style="font-size:12px;color:var(--gray);margin-bottom:8px;">Cuando terminás de limpiar un depto en el horario agendado, marcalo como "Hecho".</div>
+      <button class="btn-refresh" onclick="loadClienteDeptos()">🔄 Actualizar</button>
+      <div id="sup-deptos"></div>
+      <div class="section-title" style="margin-top:22px;">✅ Limpiezas hechas</div>
+      <div id="sup-deptos-hist"></div>
     </div>
   </div>
 
@@ -2281,13 +2292,17 @@
   }
 
   function supShowView(view) {
-    ["visitas", "form", "materiales", "fichadas"].forEach(v => {
+    ["visitas", "form", "materiales", "fichadas", "deptos"].forEach(v => {
       const el = document.getElementById("sup-view-" + v);
       if (el) el.style.display = v === view ? "block" : "none";
     });
     if (view === "visitas")    cargarSupVisitas();
     if (view === "materiales") cargarSupComprados();
     if (view === "fichadas")   initSupFichadas();
+    if (view === "deptos") {
+      clienteCtx = { deptos: "sup-deptos", hist: "sup-deptos-hist", fact: null, modo: "supervisor" };
+      loadClienteDeptos();
+    }
   }
 
   // En vista previa, el admin consulta los datos del supervisor previsualizado
@@ -5756,26 +5771,36 @@
     loadClienteDeptos();
   }
 
+  // Auth para los endpoints de deptos según el modo. El supervisor manda sus
+  // credenciales (supAuth: usuario+hash, o +admin en vista previa); admin/cliente
+  // mandan admin+hash.
+  function deptosAuth() {
+    return clienteCtx.modo === "supervisor" ? supAuth() : { admin: currentUser, hash: currentHash };
+  }
+
   async function loadClienteDeptos() {
     const cont = document.getElementById(clienteCtx.deptos);
     cont.innerHTML = `<div class="hist-loading">⏳ Cargando...</div>`;
     try {
-      const j = await fetchJson({ action: "deptosClienteEstado", admin: currentUser, hash: currentHash });
+      const j = await fetchJson(Object.assign({ action: "deptosClienteEstado" }, deptosAuth()));
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
       clienteData = j;
-      await cargarInventario();
+      if (clienteCtx.modo !== "supervisor") await cargarInventario();   // el supervisor no gestiona inventario
       renderClienteDeptos();
       renderClienteHistorial();
       renderClienteFacturacion();
     } catch (e) {
       cont.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
-      document.getElementById(clienteCtx.hist).innerHTML = "";
+      const h = document.getElementById(clienteCtx.hist); if (h) h.innerHTML = "";
     }
   }
 
   function renderClienteDeptos() {
     const cont = document.getElementById(clienteCtx.deptos);
-    const esAdminModo = clienteCtx.modo === "admin";
+    // Capacidades por modo: "Hecho" lo ponen admin y supervisor; solicitar/
+    // cancelar/inventario son de admin y cliente (el supervisor solo cierra visitas).
+    const puedeHecho   = clienteCtx.modo === "admin" || clienteCtx.modo === "supervisor";
+    const puedeGestion = clienteCtx.modo === "admin" || clienteCtx.modo === "cliente";
     const eds = (clienteData && clienteData.edificios) || [];
     if (!eds.length) { cont.innerHTML = `<div class="hist-empty">Sin edificios configurados.</div>`; return; }
     cont.innerHTML = eds.map((e, ei) => {
@@ -5792,19 +5817,19 @@
                 ${s.nota ? `<div class="hr-hora">📝 ${s.nota}</div>` : ""}
               </div>
               <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
-                ${esAdminModo ? `<button class="btn-mini" style="background:#0a7d5a;color:#fff;border:none;margin:0;" onclick="marcarLimpiezaHecha('${s.id}')">✅ Hecho</button>` : ""}
-                <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openInventarioModal(${ei}, '${d.depto}')">📦 Inventario</button>
-                <button class="btn-mini btn-anular" onclick="cancelarLimpieza('${s.id}')">✖ Cancelar</button>
+                ${puedeHecho ? `<button class="btn-mini" style="background:#0a7d5a;color:#fff;border:none;margin:0;" onclick="marcarLimpiezaHecha('${s.id}')">✅ Hecho</button>` : ""}
+                ${puedeGestion ? `<button class="btn-mini btn-cambiar" style="margin:0;" onclick="openInventarioModal(${ei}, '${d.depto}')">📦 Inventario</button>` : ""}
+                ${puedeGestion ? `<button class="btn-mini btn-anular" onclick="cancelarLimpieza('${s.id}')">✖ Cancelar</button>` : ""}
               </div>
             </div>`;
         }
         return `
           <div class="hist-row">
             <div><div class="hr-serv">🏠 Depto ${d.depto} · <span style="color:var(--gray);">Libre</span></div></div>
-            <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+            ${puedeGestion ? `<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
               <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openSolicitudModal(${ei}, '${d.depto}')">➕ Solicitar</button>
               <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openInventarioModal(${ei}, '${d.depto}')">📦 Inventario</button>
-            </div>
+            </div>` : `<span style="color:var(--gray);font-size:12px;">—</span>`}
           </div>`;
       }).join("");
       return `<div class="hist-day"><div class="hist-day-label">🏢 ${e.nombre}</div>${deptos}</div>`;
@@ -6025,7 +6050,7 @@
 
   async function marcarLimpiezaHecha(id) {
     if (!confirm("¿Marcar esta limpieza como hecha? El depto queda libre para una nueva solicitud.")) return;
-    const j = await fetchJson({ action: "marcarLimpiezaHecha", admin: currentUser, hash: currentHash, id });
+    const j = await fetchJson(Object.assign({ action: "marcarLimpiezaHecha", id }, deptosAuth()));
     if (j.status !== "ok") { alert(j.message || "No se pudo."); return; }
     loadClienteDeptos();
   }

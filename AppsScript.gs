@@ -3546,14 +3546,15 @@ function doGet(e) {
   // ---- Estado de todos los deptos del cliente: config (edificios + checklist)
   // + la solicitud PENDIENTE de cada depto (si la hay) + historial de HECHAS. ----
   if (p.action === "deptosClienteEstado") {
-    // Admin ve todos los edificios; un cliente ve SOLO los suyos.
+    // Admin y supervisor ven todos los edificios; un cliente ve SOLO los suyos.
     const esAdm = checkAdmin(p.admin, p.hash);
-    const esCli = !esAdm && checkCliente(p.admin, p.hash);
-    if (!esAdm && !esCli) {
+    const esSup = !esAdm && checkSupervisor(p.usuario, p.hash);
+    const esCli = !esAdm && !esSup && checkCliente(p.admin, p.hash);
+    if (!esAdm && !esSup && !esCli) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
-      const visibles = esAdm ? CLIENTE_EDIFICIOS : edificiosDeCliente(p.admin);
+      const visibles = (esAdm || esSup) ? CLIENTE_EDIFICIOS : edificiosDeCliente(p.admin);
       const nombresVisibles = {};
       visibles.forEach(function (e) { nombresVisibles[e.nombre] = true; });
       const sheet = getSolicitudesSheet();
@@ -3667,9 +3668,11 @@ function doGet(e) {
     }
   }
 
-  // ---- Nosotros marcamos una solicitud como HECHA (cierra el ciclo). ----
+  // ---- El supervisor o un admin marcan una solicitud como HECHA (cierra el
+  // ciclo). Solo ellos: "Hecho" lo pone quien supervisa/administra, no la clienta. ----
   if (p.action === "marcarLimpiezaHecha" && p.id) {
-    if (!checkAdmin(p.admin, p.hash)) {
+    const quien = (p.admin || p.usuario || "").toString();
+    if (!checkAdmin(p.admin, p.hash) && !checkSupervisor(p.usuario, p.hash)) {
       return jsonOut({ status: "error", message: "No autorizado" });
     }
     try {
@@ -3684,7 +3687,7 @@ function doGet(e) {
       const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
       sheet.getRange(idx + 2, 4).setNumberFormat("@").setValue("Hecho");
       sheet.getRange(idx + 2, 11, 1, 2).setNumberFormat("@")
-        .setValues([[(p.admin || "").toString(), now]]);
+        .setValues([[quien, now]]);
       return jsonOut({ status: "ok" });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
