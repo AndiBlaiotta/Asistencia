@@ -41,7 +41,7 @@ const HEADERS = [
 const HOJAS_NO_EMPLEADO = ["Materiales y productos", "Historial Pedidos", "Auth",
                            "Vacaciones", "Coberturas", "Ausencias", "Permisos",
                            "Tiempo Extra", "Supervisiones", "Finales de obra",
-                           "Solicitudes Deptos"];
+                           "Solicitudes Deptos", "Inventario Deptos", "Control Inventario"];
 
 // ---- Vacaciones / Coberturas ----
 // "Vacaciones": una solicitud por fila (Pendiente/Aceptada/Rechazada).
@@ -97,6 +97,30 @@ const CHECKLIST_DEPTO = [
 const SOLICITUDES_SHEET   = "Solicitudes Deptos";
 const SOLICITUDES_HEADERS = ["ID", "Edificio", "Depto", "Estado", "Fecha", "Desde",
   "Hasta", "Tareas", "Nota", "Creado", "Hecho por", "Fecha hecho"];
+
+// ---- Inventario por depto (2026-11-25) ----
+// Lista FIJA de ítems (igual para todos los deptos). La clienta y el admin
+// cargan la CANTIDAD que debe haber de cada ítem en cada depto ("Inventario
+// Deptos"). Al limpiar, el admin hace un CONTROL: anota lo encontrado vs lo
+// declarado y queda registrado quién/cuándo + los faltantes ("Control Inventario").
+const INVENTARIO_ITEMS = [
+  "Juego de toalla y toallón",
+  "Pie de baño",
+  "Ropa de cama (sábana ajustable, sábana plana y 2 fundas de almohada)",
+  "Fundas extra de almohadas",
+  "Cubre edredón",
+  "Repasadores",
+  "Reponer jabón",
+  "Reponer shampoo",
+  "Reponer acondicionador",
+  "Reponer papel higiénico",
+  "Reponer rollo de servilletas"
+];
+const INVENTARIO_SHEET    = "Inventario Deptos";
+const INVENTARIO_HEADERS  = ["Edificio", "Depto", "Item", "Cantidad"];
+const CONTROL_INV_SHEET   = "Control Inventario";
+const CONTROL_INV_HEADERS = ["ID", "Edificio", "Depto", "Fecha", "Hora", "Quién", "Detalle", "Faltantes"];
+function esItemInventario(item) { return INVENTARIO_ITEMS.indexOf(item) !== -1; }
 
 // Tipos de licencia (van todos a la hoja "Vacaciones", campo Tipo). Solo
 // "Vacaciones" consume días de cupo y tiene la regla de 7; el resto es por
@@ -1263,6 +1287,30 @@ function getSolicitudesSheet() {
     sheet = ss.insertSheet(SOLICITUDES_SHEET);
     sheet.appendRow(SOLICITUDES_HEADERS);
     sheet.getRange(1, 1, 1, SOLICITUDES_HEADERS.length)
+      .setBackground("#0a7d5a").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+function getInventarioSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(INVENTARIO_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(INVENTARIO_SHEET);
+    sheet.appendRow(INVENTARIO_HEADERS);
+    sheet.getRange(1, 1, 1, INVENTARIO_HEADERS.length)
+      .setBackground("#0a7d5a").setFontColor("white").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+function getControlInvSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONTROL_INV_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONTROL_INV_SHEET);
+    sheet.appendRow(CONTROL_INV_HEADERS);
+    sheet.getRange(1, 1, 1, CONTROL_INV_HEADERS.length)
       .setBackground("#0a7d5a").setFontColor("white").setFontWeight("bold");
     sheet.setFrozenRows(1);
   }
@@ -3628,6 +3676,134 @@ function doGet(e) {
       sheet.getRange(idx + 2, 11, 1, 2).setNumberFormat("@")
         .setValues([[(p.admin || "").toString(), now]]);
       return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ==========================================================
+  // INVENTARIO POR DEPTO (cantidades declaradas + control al limpiar)
+  // ==========================================================
+
+  // ---- Estado del inventario de los deptos visibles (admin: todos; cliente: los
+  // suyos): cantidades declaradas por ítem + el último control de cada depto. ----
+  if (p.action === "inventarioDeptos") {
+    const esAdm = checkAdmin(p.admin, p.hash);
+    const esCli = !esAdm && checkCliente(p.admin, p.hash);
+    if (!esAdm && !esCli) return jsonOut({ status: "error", message: "No autorizado" });
+    try {
+      const visibles = esAdm ? CLIENTE_EDIFICIOS : edificiosDeCliente(p.admin);
+      const scope = {};
+      visibles.forEach(function (e) { scope[e.nombre] = true; });
+      const data = {}; // "edificio||depto" -> { cant:{item:n}, control:{...}|null }
+      const inv = getInventarioSheet();
+      if (inv.getLastRow() > 1) {
+        const rows = inv.getRange(2, 1, inv.getLastRow() - 1, INVENTARIO_HEADERS.length).getValues();
+        rows.forEach(function (r) {
+          const ed = (r[0] || "").toString();
+          if (!scope[ed]) return;
+          const key = ed + "||" + (r[1] || "").toString();
+          (data[key] = data[key] || { cant: {}, control: null });
+          data[key].cant[(r[2] || "").toString()] = Number(r[3]) || 0;
+        });
+      }
+      // Último control por depto (hoja append-only: la última fila gana).
+      const ctrl = getControlInvSheet();
+      if (ctrl.getLastRow() > 1) {
+        const rows = ctrl.getRange(2, 1, ctrl.getLastRow() - 1, CONTROL_INV_HEADERS.length).getValues();
+        rows.forEach(function (r) {
+          const ed = (r[1] || "").toString();
+          if (!scope[ed]) return;
+          const key = ed + "||" + (r[2] || "").toString();
+          (data[key] = data[key] || { cant: {}, control: null });
+          let detalle = [];
+          try { detalle = JSON.parse(r[6] || "[]") || []; } catch (e) {}
+          data[key].control = { fecha: r[3], hora: r[4], quien: r[5], detalle: detalle, faltantes: r[7] };
+        });
+      }
+      return jsonOut({ status: "ok", items: INVENTARIO_ITEMS, data: data });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Guardar las cantidades declaradas de un depto (clienta o admin). ----
+  if (p.action === "guardarInventario" && p.edificio && p.depto && p.cantidades) {
+    const esAdm = checkAdmin(p.admin, p.hash);
+    const esCli = !esAdm && checkCliente(p.admin, p.hash);
+    if (!esAdm && !esCli) return jsonOut({ status: "error", message: "No autorizado" });
+    try {
+      if (!edificioConDepto(p.edificio, p.depto)) return jsonOut({ status: "error", message: "Edificio o depto inválido" });
+      if (esCli && !edificiosDeCliente(p.admin).some(function (e) { return e.nombre === p.edificio; })) {
+        return jsonOut({ status: "error", message: "No autorizado" });
+      }
+      let cant;
+      try { cant = JSON.parse(p.cantidades) || {}; } catch (e) { return jsonOut({ status: "error", message: "Cantidades inválidas" }); }
+      const inv = getInventarioSheet();
+      const idx = {}; // item -> fila real (de este depto)
+      if (inv.getLastRow() > 1) {
+        const rows = inv.getRange(2, 1, inv.getLastRow() - 1, INVENTARIO_HEADERS.length).getValues();
+        rows.forEach(function (r, i) {
+          if ((r[0] || "").toString() === p.edificio && (r[1] || "").toString() === p.depto) {
+            idx[(r[2] || "").toString()] = i + 2;
+          }
+        });
+      }
+      const nuevas = [];
+      INVENTARIO_ITEMS.forEach(function (item) {
+        if (!(item in cant)) return;
+        let n = parseInt(cant[item], 10);
+        if (isNaN(n) || n < 0) n = 0;
+        if (n > 9999) n = 9999;
+        if (idx[item]) inv.getRange(idx[item], 4).setNumberFormat("@").setValue(String(n));
+        else nuevas.push([p.edificio, p.depto, item, String(n)]);
+      });
+      if (nuevas.length) {
+        const start = inv.getLastRow() + 1;
+        inv.getRange(start, 1, nuevas.length, INVENTARIO_HEADERS.length).setNumberFormat("@").setValues(nuevas);
+      }
+      return jsonOut({ status: "ok" });
+    } catch (err) {
+      return jsonOut({ status: "error", message: err.toString() });
+    }
+  }
+
+  // ---- Registrar un CONTROL de inventario de un depto (solo admin). Compara lo
+  // encontrado con lo declarado y deja el log con quién/cuándo + faltantes. ----
+  if (p.action === "controlarInventario" && p.edificio && p.depto && p.encontradas) {
+    if (!checkAdmin(p.admin, p.hash)) return jsonOut({ status: "error", message: "No autorizado" });
+    try {
+      if (!edificioConDepto(p.edificio, p.depto)) return jsonOut({ status: "error", message: "Edificio o depto inválido" });
+      let enc;
+      try { enc = JSON.parse(p.encontradas) || {}; } catch (e) { return jsonOut({ status: "error", message: "Datos inválidos" }); }
+      const decl = {};
+      const inv = getInventarioSheet();
+      if (inv.getLastRow() > 1) {
+        const rows = inv.getRange(2, 1, inv.getLastRow() - 1, INVENTARIO_HEADERS.length).getValues();
+        rows.forEach(function (r) {
+          if ((r[0] || "").toString() === p.edificio && (r[1] || "").toString() === p.depto) {
+            decl[(r[2] || "").toString()] = Number(r[3]) || 0;
+          }
+        });
+      }
+      const detalle = [], faltantes = [];
+      INVENTARIO_ITEMS.forEach(function (item) {
+        const d = decl[item] || 0;
+        let e = parseInt(enc[item], 10);
+        if (isNaN(e) || e < 0) e = 0;
+        detalle.push({ i: item, d: d, e: e });
+        if (e < d) faltantes.push(item + " (" + e + "/" + d + ")");
+      });
+      const ctrl = getControlInvSheet();
+      const id = Utilities.getUuid().slice(0, 8);
+      const now = new Date();
+      const fecha = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy");
+      const hora  = Utilities.formatDate(now, Session.getScriptTimeZone(), "HH:mm");
+      const row = ctrl.getLastRow() + 1;
+      ctrl.getRange(row, 1, 1, CONTROL_INV_HEADERS.length).setNumberFormat("@")
+        .setValues([[id, p.edificio, p.depto, fecha, hora, (p.admin || "").toString(),
+                     JSON.stringify(detalle), faltantes.join("; ")]]);
+      return jsonOut({ status: "ok", faltantes: faltantes });
     } catch (err) {
       return jsonOut({ status: "error", message: err.toString() });
     }

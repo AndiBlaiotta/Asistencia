@@ -1217,6 +1217,18 @@
   </div>
 </div>
 
+<!-- ==================== MODAL: INVENTARIO DE UN DEPTO ==================== -->
+<div id="modal-inventario" class="modal-overlay" style="display:none;">
+  <div class="modal-box modal-scroll">
+    <div class="modal-title" style="color:var(--cyan);">📦 Inventario del depto</div>
+    <div class="modal-sub" id="minv-sub"></div>
+    <div id="minv-ultimo" style="margin-bottom:10px;"></div>
+    <div id="minv-body"></div>
+    <div id="minv-msg" style="margin-top:8px;font-size:13px;"></div>
+    <button class="btn btn-cambiar" onclick="cerrarInventarioModal()" style="margin-top:10px;">Cerrar</button>
+  </div>
+</div>
+
 <script>
   // ============================================================
   // ✏️  PEGÁ TU URL DEL APPS SCRIPT AQUÍ:
@@ -5747,6 +5759,7 @@
       const j = await fetchJson({ action: "deptosClienteEstado", admin: currentUser, hash: currentHash });
       if (j.status !== "ok") throw new Error(j.message || "No se pudo cargar.");
       clienteData = j;
+      await cargarInventario();
       renderClienteDeptos();
       renderClienteHistorial();
     } catch (e) {
@@ -5775,6 +5788,7 @@
               </div>
               <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
                 ${esAdminModo ? `<button class="btn-mini" style="background:#0a7d5a;color:#fff;border:none;margin:0;" onclick="marcarLimpiezaHecha('${s.id}')">✅ Hecho</button>` : ""}
+                <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openInventarioModal(${ei}, '${d.depto}')">📦 Inventario</button>
                 <button class="btn-mini btn-anular" onclick="cancelarLimpieza('${s.id}')">✖ Cancelar</button>
               </div>
             </div>`;
@@ -5782,11 +5796,136 @@
         return `
           <div class="hist-row">
             <div><div class="hr-serv">🏠 Depto ${d.depto} · <span style="color:var(--gray);">Libre</span></div></div>
-            <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openSolicitudModal(${ei}, '${d.depto}')">➕ Solicitar</button>
+            <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+              <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openSolicitudModal(${ei}, '${d.depto}')">➕ Solicitar</button>
+              <button class="btn-mini btn-cambiar" style="margin:0;" onclick="openInventarioModal(${ei}, '${d.depto}')">📦 Inventario</button>
+            </div>
           </div>`;
       }).join("");
       return `<div class="hist-day"><div class="hist-day-label">🏢 ${e.nombre}</div>${deptos}</div>`;
     }).join("");
+  }
+
+  // ---------- INVENTARIO POR DEPTO ----------
+  let clienteInv = { items: [], data: {} };  // { items:[...], data:{ "ed||depto": {cant, control} } }
+  let invModal = null;                        // { ei, depto, edificio }
+  let invControlAbierto = false;
+
+  async function cargarInventario() {
+    try {
+      const j = await fetchJson({ action: "inventarioDeptos", admin: currentUser, hash: currentHash });
+      clienteInv = (j.status === "ok") ? { items: j.items || [], data: j.data || {} } : { items: [], data: {} };
+    } catch (e) { clienteInv = { items: [], data: {} }; }
+  }
+  function invKey(ed, depto) { return ed + "||" + depto; }
+
+  function openInventarioModal(ei, depto) {
+    const e = clienteData.edificios[ei];
+    invModal = { ei, depto, edificio: e.nombre };
+    invControlAbierto = false;
+    document.getElementById("minv-sub").textContent = `Depto ${depto} · ${e.nombre}`;
+    document.getElementById("minv-msg").textContent = "";
+    renderInventarioModal();
+    document.getElementById("modal-inventario").style.display = "flex";
+  }
+  function cerrarInventarioModal() {
+    document.getElementById("modal-inventario").style.display = "none";
+    invModal = null;
+  }
+
+  function renderInventarioModal() {
+    if (!invModal) return;
+    const esAdmin = clienteCtx.modo === "admin";
+    const items = clienteInv.items || [];
+    const info = clienteInv.data[invKey(invModal.edificio, invModal.depto)] || { cant: {}, control: null };
+
+    const ult = document.getElementById("minv-ultimo");
+    if (info.control) {
+      const c = info.control;
+      const falt = (c.faltantes || "").trim();
+      ult.innerHTML = `<div style="padding:8px 10px;border-radius:10px;background:${falt ? "#fef2f2" : "#f0fdf4"};border:1px solid ${falt ? "#fecaca" : "#bbf7d0"};font-size:13px;">
+        <b>🔍 Último control:</b> ${c.quien || "—"} · ${c.fecha || ""} ${c.hora || ""}
+        <div style="margin-top:2px;color:${falt ? "#dc2626" : "#16a34a"};font-weight:600;">${falt ? "Faltantes: " + falt : "✓ Sin faltantes"}</div>
+      </div>`;
+    } else {
+      ult.innerHTML = `<div style="font-size:12px;color:var(--gray);">Todavía no se controló este depto.</div>`;
+    }
+
+    const cantRows = items.map((it, i) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <div style="flex:1;font-size:13px;">${it}</div>
+        <input type="number" min="0" max="9999" id="minv-cant-${i}" value="${info.cant[it] || 0}" style="width:68px;text-align:center;padding:8px;">
+      </div>`).join("");
+
+    const controlRows = items.map((it, i) => {
+      const d = info.cant[it] || 0;
+      return `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <div style="flex:1;font-size:13px;">${it} <span style="color:var(--gray);">· debe haber ${d}</span></div>
+        <input type="number" min="0" max="9999" id="minv-enc-${i}" value="${d}" style="width:68px;text-align:center;padding:8px;">
+      </div>`;
+    }).join("");
+
+    document.getElementById("minv-body").innerHTML = `
+      <label style="margin-top:4px;">Cantidades (cuánto debe haber)</label>
+      ${cantRows}
+      <button class="btn btn-primary" style="margin-top:4px;" onclick="guardarInventarioModal()">💾 Guardar cantidades</button>
+      ${esAdmin ? `
+        <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:12px;">
+          <button class="btn btn-cambiar" style="margin:0;" onclick="toggleControlInventario()">🔍 Controlar al limpiar ${invControlAbierto ? "▴" : "▾"}</button>
+          <div id="minv-control" style="display:${invControlAbierto ? "block" : "none"};margin-top:10px;">
+            <div style="font-size:12px;color:var(--gray);margin-bottom:6px;">Anotá lo que ENCONTRÁS. Lo que quede por debajo de lo que debe haber se marca como faltante.</div>
+            ${controlRows}
+            <button class="btn btn-primary" style="margin-top:4px;background:#0a7d5a;" onclick="controlarInventarioModal()">✔ Registrar control</button>
+          </div>
+        </div>` : ""}`;
+  }
+
+  function toggleControlInventario() {
+    invControlAbierto = !invControlAbierto;
+    renderInventarioModal();
+  }
+
+  async function guardarInventarioModal() {
+    if (!invModal) return;
+    const msg = document.getElementById("minv-msg");
+    const cant = {};
+    (clienteInv.items || []).forEach((it, i) => {
+      const el = document.getElementById(`minv-cant-${i}`);
+      cant[it] = el ? (parseInt(el.value, 10) || 0) : 0;
+    });
+    msg.className = "success"; msg.textContent = "Guardando...";
+    try {
+      const j = await fetchJson({ action: "guardarInventario", admin: currentUser, hash: currentHash,
+        edificio: invModal.edificio, depto: invModal.depto, cantidades: JSON.stringify(cant) });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
+      await cargarInventario();
+      renderInventarioModal();
+      const m2 = document.getElementById("minv-msg"); m2.className = "success"; m2.textContent = "✅ Cantidades guardadas.";
+    } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
+  }
+
+  async function controlarInventarioModal() {
+    if (!invModal) return;
+    const msg = document.getElementById("minv-msg");
+    const enc = {};
+    (clienteInv.items || []).forEach((it, i) => {
+      const el = document.getElementById(`minv-enc-${i}`);
+      enc[it] = el ? (parseInt(el.value, 10) || 0) : 0;
+    });
+    msg.className = "success"; msg.textContent = "Registrando control...";
+    try {
+      const j = await fetchJson({ action: "controlarInventario", admin: currentUser, hash: currentHash,
+        edificio: invModal.edificio, depto: invModal.depto, encontradas: JSON.stringify(enc) });
+      if (j.status !== "ok") { msg.className = "error"; msg.textContent = j.message || "No se pudo."; return; }
+      await cargarInventario();
+      invControlAbierto = false;
+      renderInventarioModal();
+      const falt = j.faltantes || [];
+      const m2 = document.getElementById("minv-msg");
+      m2.className = falt.length ? "error" : "success";
+      m2.textContent = falt.length ? ("⚠️ Control registrado · faltantes: " + falt.join("; ")) : "✅ Control registrado · sin faltantes.";
+    } catch (e) { msg.className = "error"; msg.textContent = "❌ " + e.message; }
   }
 
   // Selector de hora 24h propio (hh + mm), para no depender del picker nativo
