@@ -998,6 +998,8 @@
     <div id="cliente-deptos"></div>
     <div class="section-title" style="margin-top:22px;">✅ Limpiezas hechas (historial)</div>
     <div id="cliente-historial"></div>
+    <div class="section-title" style="margin-top:22px;">💵 Visitas y facturación</div>
+    <div id="cliente-factura"></div>
   </div>
 
   <!-- HORAS EXTRA: conteo por empleado y por mes -->
@@ -1149,6 +1151,8 @@
   <div id="cli-deptos"></div>
   <div class="section-title" style="margin-top:22px;">✅ Limpiezas hechas</div>
   <div id="cli-historial"></div>
+  <div class="section-title" style="margin-top:22px;">💵 Visitas y facturación</div>
+  <div id="cli-factura"></div>
   <button class="btn btn-cambiar" onclick="pedirCambioPassword()" style="margin-top:20px;">🔑 Cambiar contraseña</button>
   <button class="btn btn-logout" onclick="logout()" style="margin-top:8px;">Cerrar sesión</button>
 </div>
@@ -5732,7 +5736,7 @@
   // edificios, sin ese botón). `clienteCtx` dice en qué contenedores pintar y en
   // qué modo.
   let clienteData = null; // { edificios, items, hechas, esCliente }
-  let clienteCtx = { deptos: "cliente-deptos", hist: "cliente-historial", modo: "admin" };
+  let clienteCtx = { deptos: "cliente-deptos", hist: "cliente-historial", fact: "cliente-factura", modo: "admin" };
 
   // El cliente entra a su pantalla propia (solo deptos).
   function enterCliente(nombre, hash) {
@@ -5742,13 +5746,13 @@
     document.getElementById("cli-nombre").textContent = nombre;
     document.getElementById("screen-login").style.display   = "none";
     document.getElementById("screen-cliente").style.display = "block";
-    clienteCtx = { deptos: "cli-deptos", hist: "cli-historial", modo: "cliente" };
+    clienteCtx = { deptos: "cli-deptos", hist: "cli-historial", fact: "cli-factura", modo: "cliente" };
     loadClienteDeptos();
   }
 
   function openAdminClientes() {
     adminShowStep("clientes");
-    clienteCtx = { deptos: "cliente-deptos", hist: "cliente-historial", modo: "admin" };
+    clienteCtx = { deptos: "cliente-deptos", hist: "cliente-historial", fact: "cliente-factura", modo: "admin" };
     loadClienteDeptos();
   }
 
@@ -5762,6 +5766,7 @@
       await cargarInventario();
       renderClienteDeptos();
       renderClienteHistorial();
+      renderClienteFacturacion();
     } catch (e) {
       cont.innerHTML = `<div class="hist-empty" style="color:#ef4444;">❌ ${e.message}</div>`;
       document.getElementById(clienteCtx.hist).innerHTML = "";
@@ -6047,6 +6052,80 @@
           </div>
         </div>`;
     }).join("");
+  }
+
+  // ---------- VISITAS Y FACTURACIÓN (deptos) ----------
+  // Cada limpieza HECHA = 1 visita = COSTO_VISITA. Planilla por mes: detalle por
+  // depto (cada fecha + valor) + total. La ven clienta y admin; exportar CSV es
+  // SOLO admin. Precio editable acá.
+  const COSTO_VISITA = 60000;
+  let facturaMes = "";
+  function fmtPesos(n) { return "$" + (n || 0).toLocaleString("es-AR"); }
+
+  function renderClienteFacturacion() {
+    const el = document.getElementById(clienteCtx.fact);
+    if (!el) return;
+    const esAdmin = clienteCtx.modo === "admin";
+    const hechas = (clienteData && clienteData.hechas) || [];
+    if (!hechas.length) { el.innerHTML = `<div class="hist-empty">Todavía no hay visitas registradas.</div>`; return; }
+    const meses = [...new Set(hechas.map(s => mesKey(s.fecha)))].filter(k => k !== "0000-00").sort().reverse();
+    if (!facturaMes || meses.indexOf(facturaMes) === -1) facturaMes = meses[0];
+    const delMes = hechas.filter(s => mesKey(s.fecha) === facturaMes);
+
+    const porEdificio = {};
+    delMes.forEach(s => {
+      const ed = porEdificio[s.edificio] || (porEdificio[s.edificio] = {});
+      (ed[s.depto] = ed[s.depto] || []).push(s);
+    });
+    let totalGeneral = 0;
+    const cuerpo = Object.keys(porEdificio).sort().map(ed => {
+      const deptos = porEdificio[ed];
+      const filas = Object.keys(deptos).sort().map(dep => {
+        const visitas = deptos[dep].slice().sort((a, b) => fechaKey(a.fecha) - fechaKey(b.fecha));
+        const sub = visitas.length * COSTO_VISITA;
+        totalGeneral += sub;
+        const visHtml = visitas.map(v => `<div class="hr-hora">📅 ${fechaConDia(v.fecha)} · ${fmtPesos(COSTO_VISITA)}</div>`).join("");
+        return `<div class="hist-row"><div>
+            <div class="hr-serv">🏠 Depto ${dep} · ${visitas.length} ${visitas.length === 1 ? "visita" : "visitas"}</div>
+            ${visHtml}
+          </div><span class="badge badge-entrada">${fmtPesos(sub)}</span></div>`;
+      }).join("");
+      return `<div class="hist-day"><div class="hist-day-label">🏢 ${ed}</div>${filas}</div>`;
+    }).join("");
+
+    const selector = `<div class="filtro-bar">
+        <label for="factura-mes">Mes</label>
+        <select id="factura-mes" onchange="onFacturaMes()">
+          ${meses.map(m => `<option value="${m}"${m === facturaMes ? " selected" : ""}>${mesLabel(m)}</option>`).join("")}
+        </select>
+      </div>`;
+    const totalHtml = `<div class="filtro-total" style="font-size:15px;">Total ${mesLabel(facturaMes)}: <b>${fmtPesos(totalGeneral)}</b> · ${delMes.length} ${delMes.length === 1 ? "visita" : "visitas"} × ${fmtPesos(COSTO_VISITA)}</div>`;
+    const exportBtn = esAdmin ? `<button class="btn btn-primary" style="margin-top:10px;" onclick="exportarFacturaCSV()">⬇️ Exportar planilla (CSV)</button>` : "";
+    el.innerHTML = selector + totalHtml + cuerpo + exportBtn;
+  }
+
+  function onFacturaMes() {
+    const sel = document.getElementById("factura-mes");
+    if (sel) facturaMes = sel.value;
+    renderClienteFacturacion();
+  }
+
+  function exportarFacturaCSV() {
+    if (clienteCtx.modo !== "admin") return;   // export: solo admin
+    const hechas = (clienteData && clienteData.hechas) || [];
+    const delMes = hechas.filter(s => mesKey(s.fecha) === facturaMes).slice()
+      .sort((a, b) => (a.edificio + "||" + a.depto).localeCompare(b.edificio + "||" + b.depto) || fechaKey(a.fecha) - fechaKey(b.fecha));
+    const rows = [["Edificio", "Depto", "Fecha", "Día", "Valor visita"]];
+    delMes.forEach(s => rows.push([s.edificio, s.depto, s.fecha, diaSemanaNombre(s.fecha), COSTO_VISITA]));
+    rows.push(["", "", "", "TOTAL (" + delMes.length + " visitas)", delMes.length * COSTO_VISITA]);
+    const csv = "﻿" + rows.map(row => row.map(csvCampo).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `facturacion_deptos_${facturaMes}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // ---------- MATERIALES Y COMPRAS (admin, acceso único) ----------
