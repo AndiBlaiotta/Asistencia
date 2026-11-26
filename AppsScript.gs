@@ -122,7 +122,9 @@ const INVENTARIO_ITEMS = [
   "Reponer shampoo",
   "Reponer acondicionador",
   "Reponer papel higiénico",
-  "Reponer rollo de servilletas"
+  "Reponer rollo de servilletas",
+  "Reponer bolsas",
+  "Reponer café"
 ];
 const INVENTARIO_SHEET    = "Inventario Deptos";
 const INVENTARIO_HEADERS  = ["Edificio", "Depto", "Item", "Cantidad"];
