@@ -5959,9 +5959,14 @@
     solModal = { ei, depto };
     const edificio = clienteData.edificios[ei].nombre;
     document.getElementById("msol-sub").textContent = `Depto ${depto} · ${edificio}`;
-    document.getElementById("msol-items").innerHTML = (clienteData.items || []).map(it => `
+    document.getElementById("msol-items").innerHTML =
+      `<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+         <button type="button" class="btn-mini btn-cambiar" style="margin:0;" onclick="marcarDiarioSolicitud(true)">✓ Marcar todo lo diario</button>
+         <button type="button" class="btn-mini btn-anular" style="margin:0;" onclick="marcarDiarioSolicitud(false)">✗ Limpiar</button>
+       </div>` +
+      (clienteData.items || []).map(it => `
       <label class="fo-chip" style="align-items:flex-start;">
-        <input type="checkbox" class="msol-chk" value="${it.clave}"
+        <input type="checkbox" class="msol-chk" value="${it.clave}" data-diario="${it.diario ? "1" : "0"}"
                onchange="this.closest('.fo-chip').classList.toggle('on', this.checked)">
         <span><b>${it.clave}</b><br><span style="font-weight:400;color:var(--gray);font-size:12px;">${it.detalle}</span></span>
       </label>`).join("");
@@ -5975,6 +5980,17 @@
   function cerrarSolicitudModal() {
     document.getElementById("modal-solicitud").style.display = "none";
     solModal = null;
+  }
+  // on=true: marca todas las tareas "diario" (todo menos Limpieza profunda); no
+  // toca lo que el cliente ya tildó a mano. on=false: limpia toda la selección.
+  function marcarDiarioSolicitud(on) {
+    document.querySelectorAll("#msol-items .msol-chk").forEach(c => {
+      if (on) {
+        if (c.getAttribute("data-diario") === "1") { c.checked = true; c.closest(".fo-chip").classList.add("on"); }
+      } else {
+        c.checked = false; c.closest(".fo-chip").classList.remove("on");
+      }
+    });
   }
 
   async function enviarSolicitud() {

@@ -80,19 +80,27 @@ const CLIENTE_EDIFICIOS = [
 // Ítems de la checklist = el pedido de la clienta (qué quiere que hagamos).
 // clave = lo que se guarda/muestra corto; detalle = descripción. Iguales para
 // todos los deptos. (El ítem "Llaves y acceso" quedó afuera a pedido de Andi.)
+// diario = tarea de rutina: el front tiene un botón "marcar todo lo diario" que
+// selecciona todas las diario de una (todo menos "Limpieza profunda mensual").
 const CHECKLIST_DEPTO = [
-  { clave: "Baño",                          detalle: "Limpieza completa y desinfección." },
-  { clave: "Ropa blanca",                   detalle: "Cambio de sábanas y toallas, y cama tendida igual que en las fotos del aviso." },
-  { clave: "Cocina",                        detalle: "Limpieza, lavado de vajilla y limpieza por dentro de microondas, cafetera y pava." },
-  { clave: "Limpieza de horno",             detalle: "Limpieza del horno por dentro y las hornallas." },
-  { clave: "Heladera y residuos",           detalle: "Vaciar lo que dejaron los huéspedes y sacar la basura." },
-  { clave: "Pisos",                         detalle: "Aspirado o barrido y trapeado." },
-  { clave: "Vidrios",                       detalle: "Solo cara interior y lo que se alcanza desde el balcón." },
-  { clave: "Muebles",                       detalle: "Quitar el polvo de todas las superficies." },
-  { clave: "Desinfección de lo más tocado", detalle: "Picaportes, llaves de luz, controles remotos y canillas." },
-  { clave: "Reposición de consumibles",     detalle: "Papel higiénico, jabón, shampoo, café y bolsas (cobrados aparte si los ponemos nosotros)." },
-  { clave: "Inspección y reporte",          detalle: "Daños, faltantes, objetos olvidados y cosas que no funcionan, con fotos para el dueño." },
-  { clave: "Limpieza profunda mensual",     detalle: "Horno, heladera a fondo, colchones, cortinas y vidrios exteriores (cotizada aparte)." }
+  { clave: "Baño",                          detalle: "Limpieza completa y desinfección.", diario: true },
+  { clave: "Ropa blanca",                   detalle: "Cambio de sábanas y toallas, y cama tendida igual que en las fotos del aviso.", diario: true },
+  { clave: "Cocina",                        detalle: "Limpieza, lavado de vajilla y limpieza por dentro de microondas, cafetera y pava.", diario: true },
+  { clave: "Limpieza de horno",             detalle: "Limpieza del horno por dentro y las hornallas.", diario: true },
+  { clave: "Heladera y residuos",           detalle: "Vaciar lo que dejaron los huéspedes y sacar la basura.", diario: true },
+  { clave: "Pisos",                         detalle: "Aspirado o barrido y trapeado.", diario: true },
+  { clave: "Vidrios",                       detalle: "Solo cara interior y lo que se alcanza desde el balcón.", diario: true },
+  { clave: "Muebles",                       detalle: "Quitar el polvo de todas las superficies.", diario: true },
+  { clave: "Desinfección de lo más tocado", detalle: "Picaportes, llaves de luz, controles remotos y canillas.", diario: true },
+  { clave: "Reponer jabón",                 detalle: "Dejar jabón para el huésped.", diario: true },
+  { clave: "Reponer shampoo",               detalle: "Dejar shampoo para el huésped.", diario: true },
+  { clave: "Reponer acondicionador",        detalle: "Dejar acondicionador para el huésped.", diario: true },
+  { clave: "Reponer papel higiénico",       detalle: "Dejar papel higiénico.", diario: true },
+  { clave: "Reponer rollo de servilletas",  detalle: "Dejar rollo de servilletas.", diario: true },
+  { clave: "Reponer bolsas",                detalle: "Dejar bolsas de residuos.", diario: true },
+  { clave: "Reponer café",                  detalle: "Dejar café.", diario: true },
+  { clave: "Inspección y reporte",          detalle: "Daños, faltantes, objetos olvidados y cosas que no funcionan, con fotos para el dueño.", diario: true },
+  { clave: "Limpieza profunda mensual",     detalle: "Horno, heladera a fondo, colchones, cortinas y vidrios exteriores (cotizada aparte).", diario: false }
 ];
 const SOLICITUDES_SHEET   = "Solicitudes Deptos";
 const SOLICITUDES_HEADERS = ["ID", "Edificio", "Depto", "Estado", "Fecha", "Desde",
